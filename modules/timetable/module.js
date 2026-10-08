@@ -234,8 +234,7 @@
       'VERSION:2.0',
       'PRODID:-//xuanku-panel//timetable//CN',
       'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH',
-      'X-WR-CALNAME:' + icsEsc((s.term ? s.term + ' ' : '') + '课表')
+      'METHOD:PUBLISH'
     ];
     var count = 0;
     for (var di = 0; di < (maxW + 1) * 7; di++) {
@@ -251,30 +250,21 @@
       }).forEach(function (c) {
         var p0 = ps[c.start - 1], p1 = ps[c.end - 1];
         if (!p0 || !p1) return;
-        var desc = '第' + wk + '周 · 第' + c.start + '-' + c.end + '节';
-        if (c.teacher) desc += ' · ' + c.teacher;
-        if (plan.kind === 'map' && plan.note) desc += ' · ' + plan.note;
         lines.push(
           'BEGIN:VEVENT',
-          'UID:' + c.id + '-' + dateStr.replace(/-/g, '') + '-' + c.start + '@xuanku-panel',
+          'UID:' + c.id + '-' + dateStr.replace(/-/g, '') + '-' + c.start + '@kbcrt',
           'DTSTAMP:' + stamp,
           'DTSTART:' + icsDate(dateStr, p0.start),
           'DTEND:' + icsDate(dateStr, p1.end),
-          'SUMMARY:' + icsEsc(c.name + (plan.kind === 'map' ? '（补课）' : '')),
+          'SUMMARY:' + icsEsc(c.name),
           'LOCATION:' + icsEsc(c.place || ''),
-          'DESCRIPTION:' + icsEsc(desc),
-          'BEGIN:VALARM',
-          'TRIGGER:-PT10M',
-          'ACTION:DISPLAY',
-          'DESCRIPTION:' + icsEsc(c.name + ' 10 分钟后上课'),
-          'END:VALARM',
           'END:VEVENT'
         );
         count++;
       });
     }
     lines.push('END:VCALENDAR');
-    var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    var blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/calendar;charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
