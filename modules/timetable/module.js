@@ -206,6 +206,85 @@
     el.addEventListener('pointercancel', end);
   }
 
+  /* ---------------- 导出日历 .ics（手机日历 APP 导入，逐次提醒） ---------------- */
+  function icsEsc(t) {
+    return String(t == null ? '' : t).replace(/\\/g, '\\\\').replace(/;/g, '\\;')
+      .replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  }
+  function icsStamp(d) {
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + 'T' +
+      p2(d.getUTCHours()) + p2(d.getUTCMinutes()) + p2(d.getUTCSeconds()) + 'Z';
+  }
+  function icsDate(dateStr, hhmm) {
+    return dateStr.replace(/-/g, '') + 'T' + hhmm.replace(':', '') + '00';
+  }
+
+  function exportIcs() {
+    var s = doc.settings;
+    var ps = periods();
+    var termStart = U.parseDate(s.termStart || U.today());
+    var maxW = 1;
+    doc.courses.forEach(function (c) {
+      (Array.isArray(c.weeks) ? c.weeks : []).forEach(function (w) { if (w > maxW) maxW = w; });
+    });
+    var stamp = icsStamp(new Date());
+    var lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//xuanku-panel//timetable//CN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:' + icsEsc((s.term ? s.term + ' ' : '') + '课表')
+    ];
+    var count = 0;
+    for (var di = 0; di < (maxW + 1) * 7; di++) {
+      var dateStr = U.today(U.addDays(termStart, di));
+      var plan = planFor(dateStr);
+      if (plan.kind === 'off') continue;
+      var dayNum = plan.kind === 'map' ? plan.srcDay : dayIdx(dateStr) + 1;
+      var wk = plan.kind === 'map' ? plan.week : weekOfDate(dateStr);
+      if (wk < 1) continue;
+      doc.courses.filter(function (c) {
+        if (c.day !== dayNum) return false;
+        return Array.isArray(c.weeks) ? c.weeks.indexOf(wk) !== -1 : true;
+      }).forEach(function (c) {
+        var p0 = ps[c.start - 1], p1 = ps[c.end - 1];
+        if (!p0 || !p1) return;
+        var desc = '第' + wk + '周 · 第' + c.start + '-' + c.end + '节';
+        if (c.teacher) desc += ' · ' + c.teacher;
+        if (plan.kind === 'map' && plan.note) desc += ' · ' + plan.note;
+        lines.push(
+          'BEGIN:VEVENT',
+          'UID:' + c.id + '-' + dateStr.replace(/-/g, '') + '-' + c.start + '@xuanku-panel',
+          'DTSTAMP:' + stamp,
+          'DTSTART:' + icsDate(dateStr, p0.start),
+          'DTEND:' + icsDate(dateStr, p1.end),
+          'SUMMARY:' + icsEsc(c.name + (plan.kind === 'map' ? '（补课）' : '')),
+          'LOCATION:' + icsEsc(c.place || ''),
+          'DESCRIPTION:' + icsEsc(desc),
+          'BEGIN:VALARM',
+          'TRIGGER:-PT10M',
+          'ACTION:DISPLAY',
+          'DESCRIPTION:' + icsEsc(c.name + ' 10 分钟后上课'),
+          'END:VALARM',
+          'END:VEVENT'
+        );
+        count++;
+      });
+    }
+    lines.push('END:VCALENDAR');
+    var blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (s.term ? s.term + '-' : '') + '课表.ics';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    try { Panel.ui.toast('已导出 ' + count + ' 条日程，打开手机日历导入即可', 'success'); } catch (e) {}
+  }
+
   /* ---------------- 渲染 ---------------- */
   function render() {
     if (!host) return;
@@ -244,6 +323,10 @@
             render();
           }
         }, s.showAllWeeks ? '显示：全部周' : '显示：本周'),
+        C('button', {
+          class: 'chip', type: 'button', title: '导出 .ics 日历文件，可导入手机日历提醒',
+          onclick: function () { exportIcs(); }
+        }, '导出日历'),
         BOOT.readOnly ? null :
           C('button', { class: 'chip', type: 'button', onclick: function () { Panel.navigate('settings'); } }, '课表设置')));
 
