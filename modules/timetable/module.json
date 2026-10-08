@@ -1,0 +1,9 @@
+{
+  "id": "timetable",
+  "name": "课表",
+  "icon": "calendar",
+  "order": 1,
+  "description": "周课表",
+  "js": "module.js",
+  "css": "module.css"
+}
