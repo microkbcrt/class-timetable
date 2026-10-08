@@ -166,6 +166,7 @@
       startX = e.clientX; startY = e.clientY;
       dx = 0; dragging = true; decided = false; dragMoved = false;
       el.classList.remove('kb-drag-anime');
+      el.classList.remove('kb-in-next', 'kb-in-prev');   /* 防入场动画残留锁住 transform */
     });
 
     el.addEventListener('pointermove', function (e) {
@@ -262,7 +263,13 @@
     var grid = C('div', { class: 'kb-grid' });
     scroll.appendChild(grid);
     host.appendChild(scroll);
-    if (slideDir) { grid.classList.add(slideDir > 0 ? 'kb-in-next' : 'kb-in-prev'); slideDir = 0; }
+    if (slideDir) {
+      var inClass = slideDir > 0 ? 'kb-in-next' : 'kb-in-prev';
+      grid.classList.add(inClass);
+      slideDir = 0;
+      /* 动画结束立即摘掉：fill both 的 transform 会压过拖动的 inline transform */
+      grid.addEventListener('animationend', function () { grid.classList.remove(inClass); }, { once: true });
+    }
     if (!s.showAllWeeks) enableSwipe(grid);
 
     grid.appendChild(C('div', { class: 'kb-corner', text: '节次', style: { gridRow: '1', gridColumn: '1' } }));
