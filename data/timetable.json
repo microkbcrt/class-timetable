@@ -286,6 +286,78 @@
       "credit": "1.0"
     },
     {
+      "id": "c19",
+      "day": 3,
+      "start": 6,
+      "end": 7,
+      "period": "6-7",
+      "name": "大学生职业生涯规划",
+      "weeks": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "weekText": "6-9周",
+      "place": "旭日楼-209",
+      "campus": "本校区",
+      "teacher": "黄秋华",
+      "class": "(2026-2027-1)-1800016-57",
+      "group": "26地理信息科学1班;26地理信息科学2班",
+      "exam": "考查",
+      "hoursCompose": "理论:15,实验:4",
+      "weekHours": "2",
+      "hours": "19",
+      "credit": "1.0"
+    },
+    {
+      "id": "c20",
+      "day": 3,
+      "start": 6,
+      "end": 7,
+      "period": "6-7",
+      "name": "大学生职业生涯规划",
+      "weeks": [
+        10,
+        11,
+        12,
+        13
+      ],
+      "weekText": "10-13周",
+      "place": "超星泛雅网络教学平台",
+      "campus": "本校区",
+      "teacher": "黄秋华",
+      "class": "(2026-2027-1)-1800016-57",
+      "group": "26地理信息科学1班;26地理信息科学2班",
+      "exam": "考查",
+      "hoursCompose": "理论:15,实验:4",
+      "weekHours": "2",
+      "hours": "19",
+      "credit": "1.0"
+    },
+    {
+      "id": "c21",
+      "day": 3,
+      "start": 6,
+      "end": 7,
+      "period": "6-7",
+      "name": "大学生职业生涯规划",
+      "weeks": [
+        14
+      ],
+      "weekText": "第14周",
+      "place": "校内活动场地",
+      "campus": "本校区",
+      "teacher": "黄秋华",
+      "class": "(2026-2027-1)-1800016-57",
+      "group": "26地理信息科学1班;26地理信息科学2班",
+      "exam": "考查",
+      "hoursCompose": "理论:15,实验:4",
+      "weekHours": "2",
+      "hours": "19",
+      "credit": "1.0"
+    },
+    {
       "id": "c08",
       "day": 3,
       "start": 10,
@@ -585,78 +657,6 @@
       "credit": "0.5"
     },
     {
-      "id": "c19",
-      "day": 3,
-      "start": 6,
-      "end": 7,
-      "period": "6-7",
-      "name": "大学生职业生涯规划",
-      "weeks": [
-        6,
-        7,
-        8,
-        9
-      ],
-      "weekText": "6-9周",
-      "place": "旭日楼-209",
-      "campus": "本校区",
-      "teacher": "黄秋华",
-      "class": "(2026-2027-1)-1800016-01",
-      "group": "26地理信息科学2班",
-      "exam": "考查",
-      "hoursCompose": "理论:19",
-      "weekHours": "2",
-      "hours": "19",
-      "credit": "1.0"
-    },
-    {
-      "id": "c20",
-      "day": 3,
-      "start": 6,
-      "end": 7,
-      "period": "6-7",
-      "name": "大学生职业生涯规划",
-      "weeks": [
-        10,
-        11,
-        12,
-        13
-      ],
-      "weekText": "10-13周",
-      "place": "超星泛雅网络教学平台",
-      "campus": "本校区",
-      "teacher": "黄秋华",
-      "class": "(2026-2027-1)-1800016-01",
-      "group": "26地理信息科学2班",
-      "exam": "考查",
-      "hoursCompose": "理论:19",
-      "weekHours": "2",
-      "hours": "19",
-      "credit": "1.0"
-    },
-    {
-      "id": "c21",
-      "day": 3,
-      "start": 6,
-      "end": 7,
-      "period": "6-7",
-      "name": "大学生职业生涯规划",
-      "weeks": [
-        14
-      ],
-      "weekText": "第14周",
-      "place": "校内活动场地",
-      "campus": "本校区",
-      "teacher": "黄秋华",
-      "class": "(2026-2027-1)-1800016-01",
-      "group": "26地理信息科学2班",
-      "exam": "考查",
-      "hoursCompose": "理论:19",
-      "weekHours": "2",
-      "hours": "19",
-      "credit": "1.0"
-    },
-    {
       "id": "c22",
       "day": 5,
       "start": 1,
@@ -684,7 +684,8 @@
       "class": "0210020",
       "group": "26地理信息科学1班、26地理信息科学2班",
       "hours": "24",
-      "credit": "2.0"
+      "credit": "2.0",
+      "manual": true
     }
   ]
 }
