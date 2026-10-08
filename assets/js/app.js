@@ -8,6 +8,7 @@
   'use strict';
 
   var BOOT = window.__PANEL__ || { modules: [], default: '' };
+  window.BOOT = BOOT;
   var META = Array.isArray(BOOT.modules) ? BOOT.modules : [];
   var metaMap = new Map(META.map(function (m) { return [m.id, m]; }));
 
