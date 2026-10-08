@@ -998,12 +998,12 @@
       if (meta.css && !document.querySelector('link[data-mod-css="' + id + '"]')) {
         var link = document.createElement('link');
         link.rel = 'stylesheet';
-        link.href = 'modules/' + id + '/' + meta.css;
+        link.href = 'modules/' + id + '/' + meta.css + '?_=' + Date.now();
         link.dataset.modCss = id;
         document.head.appendChild(link);
       }
       var script = document.createElement('script');
-      script.src = 'modules/' + id + '/' + meta.js;
+      script.src = 'modules/' + id + '/' + meta.js + '?_=' + Date.now();
       script.dataset.modJs = id;
       script.onload = function () {
         if (registry.has(id)) resolve(registry.get(id));
