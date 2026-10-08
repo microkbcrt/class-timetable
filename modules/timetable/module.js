@@ -302,9 +302,13 @@
       });
     });
     lines.push('END:VCALENDAR');
-    Panel.util.saveFile((s.term ? s.term + '-' : '') + '课表.ics',
-      lines.join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
-    try { Panel.ui.toast('已导出 ' + series + ' 个系列（共 ' + count + ' 次课），打开手机日历导入即可', 'success'); } catch (e) {}
+    try {
+      Panel.util.saveFile((s.term ? s.term + '-' : '') + '课表.ics',
+        lines.join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
+      Panel.ui.toast('已导出 ' + series + ' 个系列（共 ' + count + ' 次课），选择分享方式即可', 'success');
+    } catch (e) {
+      Panel.ui.toast('导出失败：' + e.message + '（刚更新过请卸载重装新版）', 'error');
+    }
   }
 
   /* ---------------- 渲染 ---------------- */

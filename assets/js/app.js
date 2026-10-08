@@ -146,11 +146,13 @@
         clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms || 200);
       };
     },
-    /* 导出文件：原生端(Android WebView 不支持 a[download])写入缓存并调起系统分享，浏览器端直接下载。失败才 toast */
+    /* 导出文件：原生端(Android WebView 不支持 a[download])写入缓存并调起系统分享，浏览器端直接下载。
+       原生分支任何失败都 toast 报错，绝不静默落回浏览器方式 */
     saveFile: function (name, text, mime) {
       var cap = window.Capacitor;
-      if (cap && cap.isNativePlatform && cap.isNativePlatform()) {
-        try {
+      var isNative = cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform();
+      if (isNative) {
+        return Promise.resolve().then(function () {
           var FS = cap.registerPlugin('Filesystem');
           var SH = cap.registerPlugin('Share');
           var bytes = new TextEncoder().encode(text);
@@ -163,12 +165,12 @@
               title: name,
               files: [{ name: name, uri: res.uri, mimeType: mime || 'application/octet-stream' }]
             });
-          }).catch(function (e) {
-            var msg = (e && e.message) || String(e || '');
-            if (/cancel/i.test(msg)) return;
-            try { Panel.ui.toast('导出失败：' + msg, 'error'); } catch (e2) {}
           });
-        } catch (e) { /* 插件不可用则落回浏览器方式 */ }
+        }).catch(function (e) {
+          var msg = (e && e.message) || String(e || '');
+          if (/cancel/i.test(msg)) return;
+          try { Panel.ui.toast('导出失败：' + msg, 'error'); } catch (e2) {}
+        });
       }
       var blob = new Blob([text], { type: mime || 'application/octet-stream' });
       var url = URL.createObjectURL(blob);
