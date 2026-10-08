@@ -166,9 +166,11 @@
           return cap.nativePromise('Filesystem', 'writeFile', {
             path: name, data: btoa(bin), directory: 'CACHE'
           }).then(function (res) {
+            /* Share.files 是 file:// URL 字符串数组（非对象），原生按 (String) 强转 */
             return cap.nativePromise('Share', 'share', {
               title: name,
-              files: [{ name: name, uri: res && res.uri, mimeType: mime || 'application/octet-stream' }]
+              dialogTitle: name,
+              files: [res && res.uri]
             });
           });
         }).catch(function (e) {
