@@ -153,17 +153,22 @@
       var isNative = cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform();
       if (isNative) {
         return Promise.resolve().then(function () {
-          var FS = cap.registerPlugin('Filesystem');
-          var SH = cap.registerPlugin('Share');
+          if (typeof cap.nativePromise !== 'function') {
+            throw new Error('Capacitor 桥未就绪 (nativePromise 缺失)');
+          }
           var bytes = new TextEncoder().encode(text);
           var bin = '';
           for (var i = 0; i < bytes.length; i += 32768) {
             bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
           }
-          return FS.writeFile({ path: name, data: btoa(bin), directory: 'CACHE' }).then(function (res) {
-            return SH.share({
+          /* 原生桥直调：window.Capacitor.nativePromise 是 bridge 注入的分发原语，
+             与 registerPlugin 内部 rtype:'promise' 路径完全一致，无需加载 @capacitor/core */
+          return cap.nativePromise('Filesystem', 'writeFile', {
+            path: name, data: btoa(bin), directory: 'CACHE'
+          }).then(function (res) {
+            return cap.nativePromise('Share', 'share', {
               title: name,
-              files: [{ name: name, uri: res.uri, mimeType: mime || 'application/octet-stream' }]
+              files: [{ name: name, uri: res && res.uri, mimeType: mime || 'application/octet-stream' }]
             });
           });
         }).catch(function (e) {
