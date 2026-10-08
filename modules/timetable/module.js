@@ -259,7 +259,10 @@
       } else {
         list = visible.filter(function (c) { return c.day === day; });
       }
-      list = list.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+      /* 英语在左、日语在右：同段平局按 id 升序（c13 英语 < c22 日语）显式定序 */
+      list = list.slice().sort(function (a, b) {
+        return a.start - b.start || a.end - b.end || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      });
       if (!list.length) continue;
 
       /* 时间段两两相交的课程归入同一组（传递合并） */
@@ -277,7 +280,8 @@
       /* 组内分配 lane（同时间段的按最早开课周从左到右），列宽只在组内均分 */
       groups.forEach(function (g) {
         var ordered = g.slice().sort(function (a, b) {
-          return a.start - b.start || a.end - b.end || minWeek(a) - minWeek(b);
+          return a.start - b.start || a.end - b.end || minWeek(a) - minWeek(b)
+            || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
         });
         var laneEnds = [];
         ordered.forEach(function (c) {
