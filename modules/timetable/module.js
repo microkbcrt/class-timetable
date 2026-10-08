@@ -216,8 +216,13 @@
     return d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + 'T' +
       p2(d.getUTCHours()) + p2(d.getUTCMinutes()) + p2(d.getUTCSeconds()) + 'Z';
   }
-  function icsDate(dateStr, hhmm) {
-    return dateStr.replace(/-/g, '') + 'T' + hhmm.replace(':', '') + '00';
+  /* 北京时间(UTC+8) → UTC，尾部带 Z。OPPO 等会把无时区时间当 UTC 显示成凌晨，带 Z 后各端都会按本地时区换回正确时间 */
+  function icsUtc(dateStr, hhmm) {
+    var hm = String(hhmm).split(':');
+    var h = parseInt(hm[0], 10) - 8;
+    var d = U.parseDate(dateStr);
+    if (h < 0) { h += 24; d = U.addDays(d, -1); }
+    return U.today(d).replace(/-/g, '') + 'T' + (h < 10 ? '0' : '') + h + hm[1] + '00Z';
   }
 
   function exportIcs() {
@@ -254,10 +259,15 @@
           'BEGIN:VEVENT',
           'UID:' + c.id + '-' + dateStr.replace(/-/g, '') + '-' + c.start + '@kbcrt',
           'DTSTAMP:' + stamp,
-          'DTSTART:' + icsDate(dateStr, p0.start),
-          'DTEND:' + icsDate(dateStr, p1.end),
+          'DTSTART:' + icsUtc(dateStr, p0.start),
+          'DTEND:' + icsUtc(dateStr, p1.end),
           'SUMMARY:' + icsEsc(c.name),
           'LOCATION:' + icsEsc(c.place || ''),
+          'BEGIN:VALARM',
+          'TRIGGER:-PT20M',
+          'ACTION:DISPLAY',
+          'DESCRIPTION:' + icsEsc(c.name),
+          'END:VALARM',
           'END:VEVENT'
         );
         count++;
