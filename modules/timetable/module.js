@@ -302,14 +302,8 @@
       });
     });
     lines.push('END:VCALENDAR');
-    var blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/calendar;charset=utf-8' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = (s.term ? s.term + '-' : '') + '课表.ics';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    Panel.util.saveFile((s.term ? s.term + '-' : '') + '课表.ics',
+      lines.join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
     try { Panel.ui.toast('已导出 ' + series + ' 个系列（共 ' + count + ' 次课），打开手机日历导入即可', 'success'); } catch (e) {}
   }
 

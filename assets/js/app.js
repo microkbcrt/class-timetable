@@ -145,6 +145,41 @@
         var a = arguments, self = this;
         clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms || 200);
       };
+    },
+    /* 导出文件：原生端(Android WebView 不支持 a[download])写入缓存并调起系统分享，浏览器端直接下载。失败才 toast */
+    saveFile: function (name, text, mime) {
+      var cap = window.Capacitor;
+      if (cap && cap.isNativePlatform && cap.isNativePlatform()) {
+        try {
+          var FS = cap.registerPlugin('Filesystem');
+          var SH = cap.registerPlugin('Share');
+          var bytes = new TextEncoder().encode(text);
+          var bin = '';
+          for (var i = 0; i < bytes.length; i += 32768) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+          }
+          return FS.writeFile({ path: name, data: btoa(bin), directory: 'CACHE' }).then(function (res) {
+            return SH.share({
+              title: name,
+              files: [{ name: name, uri: res.uri, mimeType: mime || 'application/octet-stream' }]
+            });
+          }).catch(function (e) {
+            var msg = (e && e.message) || String(e || '');
+            if (/cancel/i.test(msg)) return;
+            try { Panel.ui.toast('导出失败：' + msg, 'error'); } catch (e2) {}
+          });
+        } catch (e) { /* 插件不可用则落回浏览器方式 */ }
+      }
+      var blob = new Blob([text], { type: mime || 'application/octet-stream' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      return Promise.resolve();
     }
   };
 
