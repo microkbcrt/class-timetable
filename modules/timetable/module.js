@@ -216,13 +216,8 @@
     return d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + 'T' +
       p2(d.getUTCHours()) + p2(d.getUTCMinutes()) + p2(d.getUTCSeconds()) + 'Z';
   }
-  /* 北京时间(UTC+8) → UTC，尾部带 Z。OPPO 等会把无时区时间当 UTC 显示成凌晨，带 Z 后各端都会按本地时区换回正确时间 */
-  function icsUtc(dateStr, hhmm) {
-    var hm = String(hhmm).split(':');
-    var h = parseInt(hm[0], 10) - 8;
-    var d = U.parseDate(dateStr);
-    if (h < 0) { h += 24; d = U.addDays(d, -1); }
-    return U.today(d).replace(/-/g, '') + 'T' + (h < 10 ? '0' : '') + h + hm[1] + '00Z';
+  function localDT(dateStr, hhmm) {
+    return dateStr.replace(/-/g, '') + 'T' + hhmm.replace(':', '') + '00';
   }
 
   function exportIcs() {
@@ -233,15 +228,9 @@
     doc.courses.forEach(function (c) {
       (Array.isArray(c.weeks) ? c.weeks : []).forEach(function (w) { if (w > maxW) maxW = w; });
     });
-    var stamp = icsStamp(new Date());
-    var lines = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//xuanku-panel//timetable//CN',
-      'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH'
-    ];
-    var count = 0;
+
+    /* 1) 按调休规则展开每门课的绝对上课日期（与页面渲染完全一致：补课/调休/放假自然落在正确日期） */
+    var dates = {};
     for (var di = 0; di < (maxW + 1) * 7; di++) {
       var dateStr = U.today(U.addDays(termStart, di));
       var plan = planFor(dateStr);
@@ -253,26 +242,65 @@
         if (c.day !== dayNum) return false;
         return Array.isArray(c.weeks) ? c.weeks.indexOf(wk) !== -1 : true;
       }).forEach(function (c) {
-        var p0 = ps[c.start - 1], p1 = ps[c.end - 1];
-        if (!p0 || !p1) return;
+        (dates[c.id] = dates[c.id] || []).push(dateStr);
+      });
+    }
+
+    var stamp = icsStamp(new Date());
+    var lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//xuanku-panel//timetable//CN',
+      'BEGIN:VTIMEZONE',
+      'TZID:Asia/Shanghai',
+      'LAST-MODIFIED:' + stamp,
+      'TZURL:https://www.tzurl.org/zoneinfo-outlook/Asia/Shanghai',
+      'X-LIC-LOCATION:Asia/Shanghai',
+      'BEGIN:STANDARD',
+      'TZNAME:CST',
+      'TZOFFSETFROM:+0800',
+      'TZOFFSETTO:+0800',
+      'DTSTART:19700101T000000',
+      'END:STANDARD',
+      'END:VTIMEZONE'
+    ];
+    var count = 0, series = 0;
+
+    /* 2) 每门课：日期列表压缩成"每周连续"的段，一段一个 RRULE 系列（WAKEUP 同款格式） */
+    doc.courses.forEach(function (c) {
+      var ds = dates[c.id];
+      if (!ds || !ds.length) return;
+      ds.sort();
+      var runs = [], run = [ds[0]];
+      for (var i = 1; i < ds.length; i++) {
+        if (U.today(U.addDays(U.parseDate(ds[i - 1]), 7)) === ds[i]) run.push(ds[i]);
+        else { runs.push(run); run = [ds[i]]; }
+      }
+      runs.push(run);
+      var p0 = ps[c.start - 1], p1 = ps[c.end - 1];
+      if (!p0 || !p1) return;
+      runs.forEach(function (r, si) {
         lines.push(
           'BEGIN:VEVENT',
-          'UID:' + c.id + '-' + dateStr.replace(/-/g, '') + '-' + c.start + '@kbcrt',
           'DTSTAMP:' + stamp,
-          'DTSTART:' + icsUtc(dateStr, p0.start),
-          'DTEND:' + icsUtc(dateStr, p1.end),
+          'UID:UP-' + c.id + '-' + r[0].replace(/-/g, '') + '-s' + si + '@kbcrt',
           'SUMMARY:' + icsEsc(c.name),
-          'LOCATION:' + icsEsc(c.place || ''),
+          'DTSTART;TZID=Asia/Shanghai:' + localDT(r[0], p0.start),
+          'DTEND;TZID=Asia/Shanghai:' + localDT(r[0], p1.end),
+          'RRULE:FREQ=WEEKLY;UNTIL=' + r[r.length - 1].replace(/-/g, '') + 'T160000Z;INTERVAL=1',
+          'LOCATION:' + icsEsc((c.place || '') + (c.teacher ? ' ' + c.teacher : '')),
+          'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.place || '') + '\n' + (c.teacher || '')),
           'BEGIN:VALARM',
-          'TRIGGER:-PT20M',
           'ACTION:DISPLAY',
+          'TRIGGER;RELATED=START:-PT20M',
           'DESCRIPTION:' + icsEsc(c.name),
           'END:VALARM',
           'END:VEVENT'
         );
-        count++;
+        series++;
+        count += r.length;
       });
-    }
+    });
     lines.push('END:VCALENDAR');
     var blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/calendar;charset=utf-8' });
     var url = URL.createObjectURL(blob);
@@ -282,7 +310,7 @@
     document.body.appendChild(a);
     a.click();
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1000);
-    try { Panel.ui.toast('已导出 ' + count + ' 条日程，打开手机日历导入即可', 'success'); } catch (e) {}
+    try { Panel.ui.toast('已导出 ' + series + ' 个系列（共 ' + count + ' 次课），打开手机日历导入即可', 'success'); } catch (e) {}
   }
 
   /* ---------------- 渲染 ---------------- */
