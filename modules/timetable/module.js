@@ -145,6 +145,66 @@
     return { kind: 'normal' };
   }
 
+  /* ---------------- 左右滑动切周（跟手拖动 + 松手滑出/回弹动画） ---------------- */
+  var slideDir = 0;      /* 下一次 render 的入场方向：1=新周从右入，-1=从左入 */
+  var dragMoved = false; /* 拖动过 → 抑制随后的课程卡片 click */
+
+  function goWeek(dir) {
+    var t = activeWeek() + dir;
+    if (t < 1) return;
+    slideDir = dir;
+    viewWeek = t;
+    render();
+  }
+
+  function enableSwipe(el) {
+    var startX = 0, startY = 0, dx = 0;
+    var dragging = false, decided = false;
+
+    el.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY;
+      dx = 0; dragging = true; decided = false; dragMoved = false;
+      el.classList.remove('kb-drag-anime');
+    });
+
+    el.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var mx = e.clientX - startX, my = e.clientY - startY;
+      if (!decided) {
+        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+        decided = true;
+        if (Math.abs(my) > Math.abs(mx)) { dragging = false; return; }  /* 垂直手势交给滚动 */
+        try { el.setPointerCapture(e.pointerId); } catch (err) {}
+        el.classList.add('kb-dragging');
+      }
+      if (!dragging) return;
+      dx = mx * 0.85;                                    /* 跟手阻尼 */
+      if (dx > 0 && activeWeek() <= 1) dx *= 0.3;        /* 第 1 周再右拖 → 强阻尼 */
+      el.style.transform = 'translateX(' + dx + 'px)';
+      dragMoved = Math.abs(dx) > 6;
+      if (e.cancelable) e.preventDefault();
+    });
+
+    function end() {
+      if (!dragging) return;
+      dragging = false;
+      el.classList.remove('kb-dragging');
+      var dir = dx < 0 ? 1 : -1;                          /* 左拖=下一周 */
+      if (decided && Math.abs(dx) > 90 && activeWeek() + dir >= 1) {
+        el.classList.add('kb-drag-anime');
+        el.style.transform = 'translateX(' + (dir > 0 ? '-55%' : '55%') + ')';  /* 滑出 */
+        setTimeout(function () { slideDir = dir; viewWeek = activeWeek() + dir; render(); }, 140);
+        return;
+      }
+      el.classList.add('kb-drag-anime');                 /* 阈值内回弹 */
+      el.style.transform = '';
+      setTimeout(function () { el.classList.remove('kb-drag-anime'); dragMoved = false; }, 220);
+    }
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
   /* ---------------- 渲染 ---------------- */
   function render() {
     if (!host) return;
@@ -157,17 +217,19 @@
     var isCurWeek = week === currentWeek();
     var visible = doc.courses.filter(function (c) { return inWeek(c, week); });
 
-    /* 每列日期的显示方案（调休补课 / 放假） */
+    /* 每列日期的显示方案（调休补课 / 放假）；全部周概览时不套用调休方案 */
     var plans = [];
-    for (var pi = 0; pi < 7; pi++) plans.push(planFor(U.today(U.addDays(weekStart, pi))));
+    for (var pi = 0; pi < 7; pi++) {
+      plans.push(s.showAllWeeks ? { kind: 'normal' } : planFor(U.today(U.addDays(weekStart, pi))));
+    }
 
     var bar = C('div', { class: 'card kb-bar' },
       C('div', { class: 'kb-week' },
-        C('button', { class: 'kb-arrow', type: 'button', title: '上一周', html: Panel.iconHtml('chevronL'), onclick: function () { viewWeek = Math.max(1, week - 1); render(); } }),
+        C('button', { class: 'kb-arrow', type: 'button', title: '上一周', html: Panel.iconHtml('chevronL'), onclick: function () { goWeek(-1); } }),
         C('div', { class: 'kb-week-text' },
           C('b', { text: '第 ' + week + ' 周' }),
           C('span', { text: U.fmtDate(weekStart) + ' - ' + U.fmtDate(U.addDays(weekStart, 6)) })),
-        C('button', { class: 'kb-arrow', type: 'button', title: '下一周', html: Panel.iconHtml('chevronR'), onclick: function () { viewWeek = week + 1; render(); } }),
+        C('button', { class: 'kb-arrow', type: 'button', title: '下一周', html: Panel.iconHtml('chevronR'), onclick: function () { goWeek(1); } }),
         isCurWeek ? null : C('button', {
           class: 'chip kb-today-btn', type: 'button',
           onclick: function () { viewWeek = 0; render(); }
@@ -200,6 +262,8 @@
     var grid = C('div', { class: 'kb-grid' });
     scroll.appendChild(grid);
     host.appendChild(scroll);
+    if (slideDir) { grid.classList.add(slideDir > 0 ? 'kb-in-next' : 'kb-in-prev'); slideDir = 0; }
+    if (!s.showAllWeeks) enableSwipe(grid);
 
     grid.appendChild(C('div', { class: 'kb-corner', text: '节次', style: { gridRow: '1', gridColumn: '1' } }));
     for (var d = 1; d <= 7; d++) {
@@ -213,7 +277,7 @@
         style: { gridRow: '1', gridColumn: String(d + 1) }
       },
         C('b', { text: DAY_CN[d - 1] }),
-        C('span', { text: U.fmtDate(date) }),
+        s.showAllWeeks ? null : C('span', { text: U.fmtDate(date) }),
         dpl.kind !== 'normal'
           ? C('span', { class: 'kb-badge' + (dpl.tone === 'off' ? ' kb-badge-off' : dpl.tone === 'rev' ? ' kb-badge-rev' : ''), text: dpl.badge })
           : null));
@@ -311,7 +375,10 @@
             marginLeft: 'calc(' + (c._lane * w) + '% + 2px)',
             animationDelay: Math.min(0.3, c.start * 0.04) + 's'
           },
-          onclick: function () { showDetail(c, sw, cp.kind === 'map' ? cp : null); }
+          onclick: function () {
+            if (dragMoved) { dragMoved = false; return; }
+            showDetail(c, sw, cp.kind === 'map' ? cp : null);
+          }
         },
           C('div', { class: 'kb-course-name', text: c.name }),
           C('div', { class: 'kb-course-info' },

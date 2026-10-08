@@ -189,3 +189,12 @@
   .kb-course-sub { display: none; }
   .kb-extra-note { margin-left: 0; width: 100%; }
 }
+
+/* ---- 左右滑动切周（跟手拖动 / 松手滑出、回弹 / 新周滑入） ---- */
+.kb-grid { touch-action: pan-y; cursor: grab; }
+.kb-grid.kb-dragging { cursor: grabbing; }
+.kb-grid.kb-drag-anime { transition: transform .16s ease; }
+@keyframes kb-in-next { from { transform: translateX(42%); opacity: .25; } to { transform: none; opacity: 1; } }
+@keyframes kb-in-prev { from { transform: translateX(-42%); opacity: .25; } to { transform: none; opacity: 1; } }
+.kb-grid.kb-in-next { animation: kb-in-next .22s ease both; }
+.kb-grid.kb-in-prev { animation: kb-in-prev .22s ease both; }
