@@ -556,7 +556,9 @@
     var nextInfo = '';
     list.forEach(function (c) {
       var p = ps[c.start - 1] || ps.find(function (x) { return x.n === c.start; }) || { start: '--:--', end: '--:--' };
-      var start = minutesOf(p.start), end = minutesOf(p.end);
+      /* 连堂课结束时间取最后一小节，而非首节（否则 8:00-10:10 会显示成 8:00-8:40、8:40 就判"已上完"） */
+      var pe = ps[c.end - 1] || ps.find(function (x) { return x.n === c.end; }) || p;
+      var start = minutesOf(p.start), end = minutesOf(pe.end);
       var status = nowMin >= end ? '已上完' : nowMin >= start ? '进行中' : '还有 ' + (start - nowMin) + ' 分钟';
       var cls = nowMin >= start && nowMin < end ? 'live' : nowMin >= end ? 'done' : 'soon';
       if (!nextInfo && nowMin < start) {
@@ -568,7 +570,7 @@
         C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,' + col[0] + ',' + col[1] + ')' } }),
         C('div', { class: 'today-main' },
           C('div', { class: 'today-name', text: c.name }),
-          C('div', { class: 'today-sub', text: p.start + '-' + p.end + ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '') })),
+          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '') })),
         C('span', { class: 'today-status ' + cls, text: status })));
     });
 
