@@ -500,7 +500,7 @@
           C('div', { class: 'kb-course-name', text: c.name }),
           C('div', { class: 'kb-course-info' },
             c.hideMeta
-              ? C('span', { class: 'kb-course-hint', text: '各班不同' })
+              ? C('span', { class: 'kb-course-hint', text: '每位同学可能不同' })
               : C('span', { text: c.place || '待定' })),
           c.end - c.start > 1 || c._lanes > 1 ? C('div', { class: 'kb-course-sub', text: c.period + ' 节' }) : null);
         grid.appendChild(card);
@@ -623,7 +623,7 @@
 
     var rows = [
       ['周次', c.weekText || (c.weeks ? c.weeks.join(',') + '周' : '')],
-      c.hideMeta ? ['说明', '体育课各班任课教师与场地不同，请以个人课表为准'] : null,
+      c.hideMeta ? ['说明', '体育课每位同学的任课教师与场地可能不同，请以个人课表为准'] : null,
       c.hideMeta ? null : ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
       c.hideMeta ? null : ['教师', c.teacher || '—'],
       ['考核方式', c.exam || '—'],
