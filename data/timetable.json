@@ -274,16 +274,14 @@
         18
       ],
       "weekText": "6-18周",
-      "place": "网球场",
-      "campus": "本校区",
-      "teacher": "刘彤彤",
       "class": "1000485-712体能基础",
       "group": "2026",
       "exam": "考试",
       "hoursCompose": "理论:36",
       "weekHours": "2",
       "hours": "26",
-      "credit": "1.0"
+      "credit": "1.0",
+      "hideMeta": true
     },
     {
       "id": "c19",

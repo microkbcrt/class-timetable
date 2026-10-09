@@ -289,8 +289,8 @@
           'DTSTART;TZID=Asia/Shanghai:' + localDT(r[0], p0.start),
           'DTEND;TZID=Asia/Shanghai:' + localDT(r[0], p1.end),
           'RRULE:FREQ=WEEKLY;UNTIL=' + r[r.length - 1].replace(/-/g, '') + 'T160000Z;INTERVAL=1',
-          'LOCATION:' + icsEsc((c.place || '') + (c.teacher ? ' ' + c.teacher : '')),
-          'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.place || '') + '\n' + (c.teacher || '')),
+          'LOCATION:' + icsEsc(c.hideMeta ? '' : ((c.place || '') + (c.teacher ? ' ' + c.teacher : ''))),
+          'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.hideMeta ? '' : (c.place || '')) + '\n' + (c.hideMeta ? '' : (c.teacher || ''))),
           'BEGIN:VALARM',
           'ACTION:DISPLAY',
           'TRIGGER;RELATED=START:-PT20M',
@@ -499,7 +499,9 @@
         },
           C('div', { class: 'kb-course-name', text: c.name }),
           C('div', { class: 'kb-course-info' },
-            C('span', { text: c.place || '待定' })),
+            c.hideMeta
+              ? C('span', { class: 'kb-course-hint', text: '各班不同' })
+              : C('span', { text: c.place || '待定' })),
           c.end - c.start > 1 || c._lanes > 1 ? C('div', { class: 'kb-course-sub', text: c.period + ' 节' }) : null);
         grid.appendChild(card);
       });
@@ -580,7 +582,7 @@
         C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,' + col[0] + ',' + col[1] + ')' } }),
         C('div', { class: 'today-main' },
           C('div', { class: 'today-name', text: c.name }),
-          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '') })),
+          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + (c.hideMeta ? '' : ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '')) })),
         C('span', { class: 'today-status ' + cls, text: status })));
     });
 
@@ -621,8 +623,9 @@
 
     var rows = [
       ['周次', c.weekText || (c.weeks ? c.weeks.join(',') + '周' : '')],
-      ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
-      ['教师', c.teacher || '—'],
+      c.hideMeta ? ['说明', '体育课各班任课教师与场地不同，请以个人课表为准'] : null,
+      c.hideMeta ? null : ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
+      c.hideMeta ? null : ['教师', c.teacher || '—'],
       ['考核方式', c.exam || '—'],
       ['学分', c.credit || '—'],
       ['总学时', c.hours || '—'],
@@ -634,7 +637,7 @@
     if (ovr && ovr.kind === 'map') rows.push(['调休补课', ovr.note]);
     var dl = C('dl', { class: 'kv' });
     rows.forEach(function (r) {
-      if (!r[1]) return;
+      if (!r || !r[1]) return;
       dl.appendChild(C('dt', { text: r[0] }));
       dl.appendChild(C('dd', { text: r[1] }));
     });
