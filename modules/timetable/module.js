@@ -16,7 +16,8 @@
   var viewWeek = 0;        // 0 = 跟随当前周
   var host = null;         // 模块根节点
   var ctx = null;
-  var timer = null;
+  var timer = null;        // ticker 停止函数
+  var todayHost = null;    // 今日课程卡片容器（定时整体刷新）
 
   var colorMap = {};
   function colorOf(name) { return colorMap[name] || PALETTE[0]; }
@@ -506,8 +507,17 @@
 
     host.appendChild(C('div', { class: 'kb-extra', text: s.extra || '' }));
 
-    host.appendChild(buildToday(ps));
+    todayHost = C('div', { class: 'kb-today-wrap' });
+    todayHost.appendChild(buildToday(ps));
+    host.appendChild(todayHost);
     updateNow();
+  }
+
+  /* 重建今日课程卡片（含倒计时 / 进行中 / 已上完状态），供定时刷新调用 */
+  function refreshToday() {
+    if (!todayHost) return;
+    todayHost.textContent = '';
+    todayHost.appendChild(buildToday(periods()));
   }
 
   /* ---- 今日课程 / 下一节（始终按真实周次计算） ---- */
@@ -674,8 +684,9 @@
         doc.courses = Array.isArray(doc.courses) ? doc.courses : [];
         buildColors(doc.courses);
         render();
-        if (timer) clearInterval(timer);
-        timer = setInterval(function () { updateNow(); }, 30000);
+        if (timer) timer();
+        /* 30s 刷新当前节高亮与今日课程倒计时；锁屏/休眠/后台切回前台会立即补跑，避免倒计时不准 */
+        timer = U.ticker(function () { updateNow(); refreshToday(); }, 30000);
       }).catch(function (e) {
         el.textContent = '';
         el.appendChild(ctx.ui.empty('warn', '课表加载失败', e.message));
@@ -691,7 +702,7 @@
       }).catch(function () { render(); });
     },
     unmount: function () {
-      if (timer) clearInterval(timer);
+      if (timer) timer();
       timer = null;
     }
   });

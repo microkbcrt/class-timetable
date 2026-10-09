@@ -146,6 +146,41 @@
         clearTimeout(t); t = setTimeout(function () { fn.apply(self, a); }, ms || 200);
       };
     },
+    /* 未提交编辑的草稿（sessionStorage）：页面被系统回收/意外刷新后仍可恢复输入内容 */
+    draft: {
+      get: function (key) {
+        try { var s = sessionStorage.getItem('panel.draft.' + key); return s ? JSON.parse(s) : null; }
+        catch (e) { return null; }
+      },
+      set: function (key, obj) {
+        try { sessionStorage.setItem('panel.draft.' + key, JSON.stringify(obj)); } catch (e) {}
+      },
+      clear: function (key) {
+        try { sessionStorage.removeItem('panel.draft.' + key); } catch (e) {}
+      }
+    },
+    /* 健壮定时器：立即执行一次，之后按间隔执行；页面重新可见 / 窗口获得焦点时立即补跑一次。
+       避免手机锁屏、电脑休眠、后台标签页节流导致时钟停顿、倒计时不准。返回停止函数。 */
+    ticker: function (fn, ms) {
+      var stopped = false;
+      function run() {
+        if (stopped) return;
+        try { fn(); } catch (e) { if (window.console) console.error(e); }
+      }
+      run();
+      var id = setInterval(run, ms);
+      function onVisible() { if (document.visibilityState === 'hidden') return; run(); }
+      document.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', run);
+      window.addEventListener('pageshow', run);
+      return function () {
+        stopped = true;
+        clearInterval(id);
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('focus', run);
+        window.removeEventListener('pageshow', run);
+      };
+    },
     /* 导出文件：原生端(Android WebView 不支持 a[download])写入缓存并调起系统分享，浏览器端直接下载。
        原生分支任何失败都 toast 报错，绝不静默落回浏览器方式 */
     saveFile: function (name, text, mime) {
@@ -845,6 +880,9 @@
     el: el,
     $: $,
 
+    /* 是否有弹窗（含编辑表单）打开：用于避免后台自动刷新覆盖正在编辑的内容 */
+    hasOpenModal: function () { return modalStack.length > 0; },
+
     toast: function (msg, type) {
       var t = el('div', { class: 'toast ' + (type || 'info') },
         svgNode(type === 'success' ? 'check' : type === 'error' ? 'close' : 'info', 'toast-icon'), msg);
@@ -957,9 +995,11 @@
       return el('div', { class: 'progress' }, el('i', { style: { width: p.toFixed(1) + '%' } }));
     },
 
-    /** 表单弹窗：fields = [{name,label,type,value,required,placeholder,options,min,max,step,rows}] */
+    /** 表单弹窗：fields = [{name,label,type,value,required,placeholder,options,min,max,step,rows}]
+        opt.draftKey 可选：开启草稿保护，意外刷新/被系统回收后可恢复未提交内容 */
     form: function (opt) {
-      var values = {};
+      var draftKey = opt.draftKey ? String(opt.draftKey) : null;
+      var restored = draftKey ? util.draft.get(draftKey) : null;
       var wrap = el('div', { class: 'form-grid' });
       (opt.fields || []).forEach(function (f) {
         var input;
@@ -979,10 +1019,29 @@
           });
         }
         var initial = f.value !== undefined && f.value !== null ? String(f.value) : '';
+        if (restored && restored[f.name] !== undefined && restored[f.name] !== null) {
+          initial = String(restored[f.name]);
+        }
         input.value = initial;
         wrap.appendChild(el('div', { class: 'field' },
           el('label', {}, f.label + (f.required ? ' *' : '')), input));
       });
+
+      function readFields() {
+        var raw = {}, data = {};
+        (opt.fields || []).forEach(function (f) {
+          var node = wrap.querySelector('[name="' + f.name + '"]');
+          var v = node ? String(node.value || '').trim() : '';
+          raw[f.name] = v;
+          data[f.name] = f.type === 'number' ? (v === '' ? null : Number(v)) : v;
+        });
+        return { raw: raw, data: data };
+      }
+      if (draftKey) {
+        var persist = function () { util.draft.set(draftKey, readFields().data); };
+        wrap.addEventListener('input', persist);
+        wrap.addEventListener('change', persist);
+      }
 
       var errorLine = el('div', { class: 'form-error', style: { display: 'none' } });
       var baseActions = (opt.actions && opt.actions.length)
@@ -992,18 +1051,17 @@
       var m = ui.modal({
         title: opt.title || '编辑',
         body: [wrap, errorLine],
+        onClose: function () { if (draftKey) util.draft.clear(draftKey); },
         actions: baseActions.concat([{
           label: '保存',
           class: 'btn-primary',
           closeOnClick: false,
           onClick: function (close) {
-            var data = {};
+            var parsed = readFields();
+            var data = parsed.data;
             var invalid = null;
             (opt.fields || []).forEach(function (f) {
-              var node = wrap.querySelector('[name="' + f.name + '"]');
-              var v = node ? String(node.value || '').trim() : '';
-              if (f.required && !v && !invalid) invalid = f.label;
-              data[f.name] = f.type === 'number' ? (v === '' ? null : Number(v)) : v;
+              if (f.required && !parsed.raw[f.name] && !invalid) invalid = f.label;
             });
             if (invalid) {
               errorLine.style.display = '';
@@ -1026,6 +1084,7 @@
           }
         }])
       });
+      if (restored) ui.toast('已恢复上次未保存的编辑', 'info');
       return m;
     }
   };
@@ -1189,8 +1248,8 @@
       time.textContent = util.pad(d.getHours()) + ':' + util.pad(d.getMinutes()) + ':' + util.pad(d.getSeconds());
       date.textContent = (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + week[d.getDay()];
     }
-    tick();
-    setInterval(tick, 1000);
+    /* 用 ticker：锁屏/休眠/后台节流后，切回前台立即校准，避免时钟停顿 */
+    util.ticker(tick, 1000);
   }
 
   function buildTheme() {
