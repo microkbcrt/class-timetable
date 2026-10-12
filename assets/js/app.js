@@ -728,6 +728,33 @@
     if (status === 404) return '找不到仓库 ' + r.owner + '/' + r.repo + '（或令牌无权访问）';
     return fallback || ('GitHub 返回 HTTP ' + status);
   }
+  /* --- 同步标记：push/pull 后记录各模块内容指纹，供启动自动检查用 ---
+   * 云端 <dir>/meta.json = { app, pushedAt, hashes }；
+   * 本端 panel.pushedHashes = 上次 push/pull 完成时的模块内容指纹（FNV-1a），
+   * panel.ghSyncMark = 已对账的云端 pushedAt。
+   * 三端独立 + 手动上传的纪律下：启动时若云端比已对账状态新，
+   * 本端与云端指纹全部一致 → 静默对齐；存在差异 → 弹窗由用户裁决，
+   * 绝不静默覆盖本端未上传的修改。 */
+  function ghHash(text) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+  function ghSyncMark() { try { return Number(localStorage.getItem('panel.ghSyncMark')) || 0; } catch (e) { return 0; } }
+  function ghSetSyncMark(v) { try { localStorage.setItem('panel.ghSyncMark', String(v)); } catch (e) {} }
+  function ghStoreHashes(hashes) { try { localStorage.setItem('panel.pushedHashes', JSON.stringify(hashes || {})); } catch (e) {} }
+  function ghLocalHashes() {
+    return Promise.all(META.map(function (m) {
+      return Promise.resolve(readModDoc(m.id)).then(function (d) { return [m.id, ghHash(JSON.stringify(d))]; });
+    })).then(function (pairs) {
+      var out = {};
+      pairs.forEach(function (p) { out[p[0]] = p[1]; });
+      return out;
+    });
+  }
   /* 当前模块的完整文档：PHP 模式读服务器数据，无 PHP 模式读本地镜像 */
   function readModDoc(id) {
     if (ghEnabled()) return Promise.resolve(readLocMod(id));
@@ -737,14 +764,16 @@
     if (ghEnabled()) { writeLocMod(id, doc); return Promise.resolve(); }
     return api.set(id, '', doc);
   }
-  /* 上传：把本端全部模块数据写入 GitHub data/<id>.json（覆盖云端旧副本） */
+  /* 上传：把本端全部模块数据写入 GitHub data/<id>.json（覆盖云端旧副本），
+   * 最后写 <dir>/meta.json（pushedAt + 内容指纹）供各端启动时自动检查 */
   function ghPushAll() {
     var r = ghRepo();
     if (!ghToken()) return Promise.reject(new Error('请先在设置页填写 GitHub 令牌'));
-    var done = [];
+    var done = [], hashes = {};
     return META.reduce(function (ch, m) {
       return ch.then(function () {
         return readModDoc(m.id).then(function (doc) {
+          hashes[m.id] = ghHash(JSON.stringify(doc));
           return ghPutSmart(r.dir + '/' + m.id + '.json', JSON.stringify(doc, null, 2), 'panel: 上传 ' + m.id).then(function (res) {
             if (res.status === 200 || res.status === 201) { done.push(m.id); return m.id; }
             throw new Error(ghHttpError(res.status, '上传 ' + m.id + ' 失败（HTTP ' + res.status + '）'));
@@ -752,7 +781,12 @@
         });
       });
     }, Promise.resolve()).then(function () {
-      try { localStorage.setItem('panel.githubLastPush', String(Date.now())); } catch (e) {}
+      var pushedAt = Date.now();
+      try { localStorage.setItem('panel.githubLastPush', String(pushedAt)); } catch (e) {}
+      ghStoreHashes(hashes);
+      ghSetSyncMark(pushedAt);
+      ghPutSmart(r.dir + '/meta.json', JSON.stringify({ app: 'xuanku-panel', pushedAt: pushedAt, hashes: hashes }, null, 2), 'panel: 同步标记')
+        .catch(function () { /* 标记失败不影响数据上传 */ });
       return { pushed: done };
     });
   }
@@ -771,9 +805,13 @@
         });
       });
     }, Promise.resolve()).then(function () {
-      var out = { pulled: done };
-      if (missing.length) out.missing = missing;
-      return out;
+      return ghLocalHashes().then(function (hashes) {
+        ghStoreHashes(hashes);
+        ghSetSyncMark(Date.now());
+        var out = { pulled: done };
+        if (missing.length) out.missing = missing;
+        return out;
+      });
     });
   }
   /* 无 PHP 模式的导出/导入：读/写本地镜像（离线可用） */
@@ -796,6 +834,55 @@
       return Promise.resolve({ status: 200, body: { ok: true, data: { restored: restored } } });
     }
     return Promise.resolve({ status: 400, body: { ok: false, error: '未知操作：' + action } });
+  }
+
+  /* --- 启动自动同步检查（仅无 PHP 模式）：启动 3s 后取一次云端 meta.json，
+   * 云端比已对账状态新 → 本端指纹与云端一致则静默对齐（本来就没差异），
+   * 存在差异则弹窗让人选「拉取云端 / 上传本端 / 暂不处理」，绝不静默覆盖本端。
+   * 只读公共站（BOOT.readOnly）与未配置令牌的端自动跳过。 */
+  var GH_SYNC_TOL = 60 * 1000;
+  function ghAutoSync() {
+    if (!ghEnabled() || BOOT.readOnly || !ghToken()) return Promise.resolve({ skipped: 'disabled' });
+    if (ui.hasOpenModal()) return Promise.resolve({ skipped: 'modal' });
+    var r = ghRepo();
+    return ghGetFileTo(r, r.dir + '/meta.json').then(function (f) {
+      if (!f || !f.exists || !f.text) return { skipped: 'no-meta' };
+      var meta = ghParse(f.text);
+      if (!meta || !(meta.pushedAt > 0) || !meta.hashes) return { skipped: 'bad-meta' };
+      if (meta.pushedAt <= ghSyncMark() + GH_SYNC_TOL) return { skipped: 'fresh' };
+      return ghLocalHashes().then(function (local) {
+        var diff = META.filter(function (m) { return local[m.id] !== meta.hashes[m.id]; })
+          .map(function (m) { return m.name || m.id; });
+        if (!diff.length) {
+          ghSetSyncMark(meta.pushedAt);
+          return { skipped: 'in-sync' };
+        }
+        var when = new Date(meta.pushedAt).toLocaleString();
+        ui.modal({
+          title: '检测到云端数据更新',
+          body: function () {
+            return el('div', { class: 'confirm-text' },
+              el('p', { text: 'GitHub 仓库于 ' + when + ' 有新推送，以下模块与本端数据不一致：' }),
+              el('p', { style: { color: 'var(--text-dim, #909399)' }, text: diff.join('、') }),
+              el('p', { text: '「拉取云端」将用云端数据覆盖本端这些模块（本端未上传的修改会丢失）；「上传本端」将以本端数据覆盖云端。' }));
+          },
+          actions: [
+            { label: '拉取云端', class: 'btn-primary', onClick: function () {
+              return ghPullAll().then(function (out) {
+                ui.toast('已从云端拉取 ' + (out.pulled || []).length + ' 个模块', 'success');
+              }, function (e) { ui.toast('拉取失败：' + ((e && e.message) || e), 'error'); });
+            } },
+            { label: '上传本端', onClick: function () {
+              return ghPushAll().then(function (out) {
+                ui.toast('已上传 ' + (out.pushed || []).length + ' 个模块到 GitHub', 'success');
+              }, function (e) { ui.toast('上传失败：' + ((e && e.message) || e), 'error'); });
+            } },
+            { label: '暂不处理' }
+          ]
+        });
+        return { prompted: true, diff: diff };
+      });
+    }).catch(function () { return { skipped: 'error' }; });
   }
 
   /* 公共只读站：模块首次 get 时拉取 backend.dataUrls[mod] 覆盖本地镜像，
@@ -1303,6 +1390,9 @@
     window.addEventListener('online', function () { syncAfterFlush(); });
     if (queue.length) setTimeout(syncAfterFlush, 800);
     else if (remoteUrl) setTimeout(syncRemote, 1800);
+
+    // 无 PHP 模式：启动后自动检查云端是否有新备份（有差异会弹窗，不会静默覆盖）
+    if (GH && !BOOT.readOnly) setTimeout(ghAutoSync, 3000);
   }
 
   /* ---------------- 对外接口 ---------------- */
@@ -1366,6 +1456,8 @@
       },
       push: ghPushAll,
       pull: ghPullAll,
+      /** 启动自动同步检查（同一次入口，可手动触发；仅无 PHP 模式生效） */
+      checkRemote: ghAutoSync,
       /** 发布任意文本到指定仓库文件（公共课表等）：需已保存的 PAT 有该仓库写权限 */
       putTo: function (owner, repo, branch, rel, text, message) {
         if (!owner || !repo || !rel) return Promise.reject(new Error('putTo 缺少仓库或文件路径'));
