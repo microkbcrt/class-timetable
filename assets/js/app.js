@@ -1218,7 +1218,19 @@
       v = { el: section, mounted: false };
       views.set(id, v);
     }
+    placePageFooter();
     return v;
+  }
+
+  /* ---------------- 页脚：每页最底部的一句调侃 ---------------- */
+  var pageFooterEl = null;
+  function placePageFooter() {
+    var vp = document.getElementById('viewport');
+    if (!vp) return;
+    if (!pageFooterEl) {
+      pageFooterEl = el('div', { class: 'page-footer' }, el('span', { text: '我是有底线的' }));
+    }
+    vp.appendChild(pageFooterEl); // 始终保持在视图容器末尾，避免被新视图挤到前面
   }
 
   /* ---------------- 导航 ---------------- */
