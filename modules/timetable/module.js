@@ -307,8 +307,11 @@
       body: [
         C('div', {
           class: 'kb-subscribe-note',
-          text: '复制订阅链接在手机上导入即可随时同步最新课表并获得系统级日程上课提醒'
+          text: '复制订阅链接，在手机上导入，即可随时同步最新课表并获得系统级日程上课提醒（仅在安卓上实测）'
         }),
+        C('div', { class: 'kb-subscribe-step', text: '导入方式：' }),
+        C('div', { class: 'kb-subscribe-step', text: 'iPhone 订阅 [日历-日历-添加日历-添加订阅日历]' }),
+        C('div', { class: 'kb-subscribe-step', text: '安卓设备订阅 [日历-添加日历/日程导入-URL导入/URL日历] (名字可能有不同)' }),
         input
       ],
       actions: [
