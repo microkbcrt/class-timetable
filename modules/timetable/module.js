@@ -365,7 +365,7 @@
           'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.place || '') + '\n' + (c.teacher || '')),
           'BEGIN:VALARM',
           'ACTION:DISPLAY',
-          'TRIGGER;RELATED=START:-PT20M',
+          'TRIGGER:-PT20M',
           'DESCRIPTION:' + icsEsc(c.name),
           'END:VALARM',
           'END:VEVENT'
@@ -438,14 +438,9 @@
       title: '日历订阅',
       bodyClass: 'kb-subscribe-body',
       body: [
-        C('a', {
-          class: 'btn btn-primary kb-subscribe-native',
-          href: urls.webcal,
-          text: '一键订阅（手机上点这里）'
-        }),
         C('div', {
           class: 'kb-subscribe-note',
-          text: '手机日历的订阅入口填 webcal:// 开头的链接即可（iOS 会自行转成 https 拉取，' + urls.http + ' 同样可用）。点上面「一键订阅」可直接唤起订阅。'
+          text: '复制订阅链接在手机上导入即可随时同步最新课表并获得系统级日程上课提醒'
         }),
         input
       ],
