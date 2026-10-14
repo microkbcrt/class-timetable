@@ -430,7 +430,7 @@
     var input = C('input', {
       class: 'input kb-subscribe-url',
       type: 'text',
-      value: urls.http,
+      value: urls.webcal,
       readonly: true,
       onFocus: function (e) { e.target.select(); }
     });
@@ -445,7 +445,7 @@
         }),
         C('div', {
           class: 'kb-subscribe-note',
-          text: '手机浏览器点「一键订阅」会直接弹出订阅日历。若走 iPhone「设置 → 日历 → 账户 → 其他 → 添加已订阅的日历」，请粘贴下面这条 https 链接（该入口不接受 webcal:// 开头）。'
+          text: '手机日历的订阅入口填 webcal:// 开头的链接即可（iOS 会自行转成 https 拉取，' + urls.http + ' 同样可用）。点上面「一键订阅」可直接唤起订阅。'
         }),
         input
       ],
@@ -455,7 +455,7 @@
           class: 'btn-primary',
           closeOnClick: false,
           onClick: function (close) {
-            copyText(urls.http).then(function () {
+            copyText(urls.webcal).then(function () {
               Panel.ui.toast('订阅链接已复制', 'success');
               close();
             }).catch(function (e) {
