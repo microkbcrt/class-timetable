@@ -1,0 +1,2 @@
+# 日历订阅文件必须是 CRLF（RFC 5545 / Apple iCloud 校验严格）
+*.ics -text

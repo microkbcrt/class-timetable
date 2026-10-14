@@ -256,6 +256,28 @@
     return String(t == null ? '' : t).replace(/\\/g, '\\\\').replace(/;/g, '\\;')
       .replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
   }
+  /* RFC 5545：单行 ≤ 75 八位组，超出折行（续行以空格开头）；Apple 日历对格式校验严格 */
+  function icsBytes(ch) {
+    var c = ch.codePointAt(0);
+    return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+  }
+  function icsFold(line) {
+    var chars = Array.from ? Array.from(line) : line.split('');
+    if (line.length <= 75) {
+      var total = 0;
+      for (var i = 0; i < chars.length; i++) total += icsBytes(chars[i]);
+      if (total <= 75) return line;
+    }
+    var out = [], cur = '', len = 0;
+    chars.forEach(function (ch) {
+      var b = icsBytes(ch);
+      if (len + b > 75) { out.push(cur); cur = ' '; len = 1; }
+      cur += ch;
+      len += b;
+    });
+    out.push(cur);
+    return out.join('\r\n');
+  }
   function icsStamp(d) {
     function p2(n) { return (n < 10 ? '0' : '') + n; }
     return d.getUTCFullYear() + p2(d.getUTCMonth() + 1) + p2(d.getUTCDate()) + 'T' +
@@ -296,6 +318,12 @@
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//xuanku-panel//timetable//CN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:' + icsEsc((s.term || '课表')),
+      'X-WR-TIMEZONE:Asia/Shanghai',
+      'REFRESH-INTERVAL;VALUE=DURATION:PT12H',
+      'X-PUBLISHED-TTL:PT12H',
       'BEGIN:VTIMEZONE',
       'TZID:Asia/Shanghai',
       'LAST-MODIFIED:' + stamp,
@@ -349,24 +377,29 @@
     lines.push('END:VCALENDAR');
     try {
       Panel.util.saveFile((s.term ? s.term + '-' : '') + '课表.ics',
-        lines.join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
+        lines.map(icsFold).join('\r\n') + '\r\n', 'text/calendar;charset=utf-8');
       Panel.ui.toast('已导出 ' + series + ' 个系列（共 ' + count + ' 次课），选择分享方式即可', 'success');
     } catch (e) {
       Panel.ui.toast('导出失败：' + e.message + '（刚更新过请卸载重装新版）', 'error');
     }
   }
 
-  function subscriptionUrl() {
+  function subscriptionUrls() {
+    var http = '';
     var configured = BOOT.webcalUrl ? String(BOOT.webcalUrl).trim() : '';
-    if (configured) return configured.replace(/^https?:/i, 'webcal:');
-    if (Panel.github.mode() !== 'php' || !/^https?:$/.test(location.protocol)) return '';
-    var url = new URL('api.php', location.href);
-    url.search = '';
-    url.hash = '';
-    url.searchParams.set('m', MOD);
-    url.searchParams.set('a', 'ics');
-    if (BOOT.token) url.searchParams.set('token', BOOT.token);
-    return url.href.replace(/^https?:/i, 'webcal:');
+    if (configured) {
+      http = configured.replace(/^webcal:/i, 'https:');
+    } else if (Panel.github.mode() === 'php' && /^https?:$/.test(location.protocol)) {
+      var url = new URL('api.php', location.href);
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('m', MOD);
+      url.searchParams.set('a', 'ics');
+      if (BOOT.token) url.searchParams.set('token', BOOT.token);
+      http = url.href;
+    }
+    if (!http) return null;
+    return { http: http, webcal: http.replace(/^https?:/i, 'webcal:') };
   }
 
   function copyText(text) {
@@ -389,23 +422,31 @@
   }
 
   function showSubscription() {
-    var url = subscriptionUrl();
-    if (!url) {
+    var urls = subscriptionUrls();
+    if (!urls) {
       Panel.ui.toast('当前环境没有可用的日历订阅地址', 'error');
       return;
     }
     var input = C('input', {
       class: 'input kb-subscribe-url',
       type: 'text',
-      value: url,
+      value: urls.http,
       readonly: true,
       onFocus: function (e) { e.target.select(); }
     });
     Panel.ui.modal({
-      title: '复制日历订阅链接',
+      title: '日历订阅',
       bodyClass: 'kb-subscribe-body',
       body: [
-        C('div', { class: 'kb-subscribe-note', text: '可手动前往日历导入该订阅链接。' }),
+        C('a', {
+          class: 'btn btn-primary kb-subscribe-native',
+          href: urls.webcal,
+          text: '一键订阅（手机上点这里）'
+        }),
+        C('div', {
+          class: 'kb-subscribe-note',
+          text: '手机浏览器点「一键订阅」会直接弹出订阅日历。若走 iPhone「设置 → 日历 → 账户 → 其他 → 添加已订阅的日历」，请粘贴下面这条 https 链接（该入口不接受 webcal:// 开头）。'
+        }),
         input
       ],
       actions: [
@@ -414,7 +455,7 @@
           class: 'btn-primary',
           closeOnClick: false,
           onClick: function (close) {
-            copyText(url).then(function () {
+            copyText(urls.http).then(function () {
               Panel.ui.toast('订阅链接已复制', 'success');
               close();
             }).catch(function (e) {
@@ -485,9 +526,9 @@
           onclick: function () { exportIcs(); }
         }, '导出日历'),
         C('button', {
-          class: 'chip', type: 'button', title: '复制 webcal 日历订阅链接',
+          class: 'chip', type: 'button', title: '一键订阅 / 复制 https 订阅链接',
           onclick: function () { showSubscription(); }
-        }, '复制订阅链接'),
+        }, '日历订阅'),
         BOOT.readOnly ? null :
           C('button', { class: 'chip', type: 'button', onclick: function () { Panel.navigate('settings'); } }, '课表设置')));
 
