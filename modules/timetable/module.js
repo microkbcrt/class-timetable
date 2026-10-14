@@ -56,6 +56,17 @@
 
   function activeWeek() { return viewWeek > 0 ? viewWeek : currentWeek(); }
 
+  function weekOptions() {
+    var max = 20;
+    if (doc.settings && Number(doc.settings.weekCount) > max) max = Number(doc.settings.weekCount);
+    if (doc.courses) {
+      doc.courses.forEach(function (c) {
+        (c.weeks || []).forEach(function (w) { if (Number(w) > max) max = Number(w); });
+      });
+    }
+    return Array.apply(null, { length: max }).map(function (_, i) { return i + 1; });
+  }
+
   function sameDay(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
@@ -156,6 +167,39 @@
     slideDir = dir;
     viewWeek = t;
     render();
+  }
+
+  function sectionOf(n) { return n <= 5 ? 'morning' : n <= 9 ? 'afternoon' : 'evening'; }
+
+  /**
+   * 按实际作息生成网格行：第 1 行表头；每个时段前有独立分段行；
+   * 同时段内超过 15 分钟的课间额外占一行，避免与 5 分钟课间一样高。
+   */
+  function periodLayout(ps) {
+    var rows = {}, separators = [], row = 2;
+    var lastSection = null, lastEnd = null;
+    ps.forEach(function (p) {
+      var section = sectionOf(p.n);
+      if (lastSection === null || section !== lastSection) {
+        separators.push({ type: 'section', row: row, section: section });
+        row++;
+      } else if (lastEnd !== null) {
+        var gap = minutesOf(p.start) - lastEnd;
+        if (gap >= 15) {
+          separators.push({ type: 'break', row: row, minutes: gap, before: p.n });
+          row++;
+        }
+      }
+      rows[p.n] = row;
+      row++;
+      lastSection = section;
+      lastEnd = minutesOf(p.end);
+    });
+    return { rows: rows, separators: separators };
+  }
+
+  function periodGridRow(ps, n) {
+    return periodLayout(ps).rows[n];
   }
 
   function enableSwipe(el) {
@@ -289,8 +333,8 @@
           'DTSTART;TZID=Asia/Shanghai:' + localDT(r[0], p0.start),
           'DTEND;TZID=Asia/Shanghai:' + localDT(r[0], p1.end),
           'RRULE:FREQ=WEEKLY;UNTIL=' + r[r.length - 1].replace(/-/g, '') + 'T160000Z;INTERVAL=1',
-          'LOCATION:' + icsEsc(c.hideMeta ? '' : ((c.place || '') + (c.teacher ? ' ' + c.teacher : ''))),
-          'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.hideMeta ? '' : (c.place || '')) + '\n' + (c.hideMeta ? '' : (c.teacher || ''))),
+          'LOCATION:' + icsEsc((c.place || '') + (c.teacher ? ' ' + c.teacher : '')),
+          'DESCRIPTION:' + icsEsc('第' + c.start + ' - ' + c.end + '节\n' + (c.place || '') + '\n' + (c.teacher || '')),
           'BEGIN:VALARM',
           'ACTION:DISPLAY',
           'TRIGGER;RELATED=START:-PT20M',
@@ -310,6 +354,78 @@
     } catch (e) {
       Panel.ui.toast('导出失败：' + e.message + '（刚更新过请卸载重装新版）', 'error');
     }
+  }
+
+  function subscriptionUrl() {
+    var configured = BOOT.webcalUrl ? String(BOOT.webcalUrl).trim() : '';
+    if (configured) return configured.replace(/^https?:/i, 'webcal:');
+    if (Panel.github.mode() !== 'php' || !/^https?:$/.test(location.protocol)) return '';
+    var url = new URL('api.php', location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('m', MOD);
+    url.searchParams.set('a', 'ics');
+    if (BOOT.token) url.searchParams.set('token', BOOT.token);
+    return url.href.replace(/^https?:/i, 'webcal:');
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      var copied = false;
+      try { copied = document.execCommand('copy'); } catch (e) {}
+      area.remove();
+      copied ? resolve() : reject(new Error('浏览器拒绝了复制操作'));
+    });
+  }
+
+  function showSubscription() {
+    var url = subscriptionUrl();
+    if (!url) {
+      Panel.ui.toast('当前环境没有可用的日历订阅地址', 'error');
+      return;
+    }
+    var input = C('input', {
+      class: 'input kb-subscribe-url',
+      type: 'text',
+      value: url,
+      readonly: true,
+      onFocus: function (e) { e.target.select(); }
+    });
+    Panel.ui.modal({
+      title: '复制日历订阅链接',
+      bodyClass: 'kb-subscribe-body',
+      body: [
+        C('div', { class: 'kb-subscribe-note', text: '可手动前往日历导入该订阅链接。' }),
+        input
+      ],
+      actions: [
+        {
+          label: '复制订阅链接',
+          class: 'btn-primary',
+          closeOnClick: false,
+          onClick: function (close) {
+            copyText(url).then(function () {
+              Panel.ui.toast('订阅链接已复制', 'success');
+              close();
+            }).catch(function (e) {
+              Panel.ui.toast('复制失败：' + e.message, 'error');
+            });
+            return false;
+          }
+        },
+        { label: '关闭', class: 'btn-ghost' }
+      ]
+    });
   }
 
   /* ---------------- 渲染 ---------------- */
@@ -333,6 +449,20 @@
     var bar = C('div', { class: 'card kb-bar' },
       C('div', { class: 'kb-week' },
         C('button', { class: 'kb-arrow', type: 'button', title: '上一周', html: Panel.iconHtml('chevronL'), onclick: function () { goWeek(-1); } }),
+        C('select', {
+          class: 'form-select kb-week-select',
+          'aria-label': '选择教学周',
+          onchange: function (e) {
+            viewWeek = Number(e.target.value);
+            render();
+          }
+        }, weekOptions().map(function (w) {
+          return C('option', {
+            value: String(w),
+            selected: w === week,
+            text: '第 ' + w + ' 周' + (w === currentWeek() ? '（本周）' : '')
+          });
+        })),
         C('div', { class: 'kb-week-text' },
           C('b', { text: '第 ' + week + ' 周' }),
           C('span', { text: U.fmtDate(weekStart) + ' - ' + U.fmtDate(U.addDays(weekStart, 6)) })),
@@ -354,6 +484,10 @@
           class: 'chip', type: 'button', title: '导出 .ics 日历文件，可导入手机日历提醒',
           onclick: function () { exportIcs(); }
         }, '导出日历'),
+        C('button', {
+          class: 'chip', type: 'button', title: '复制 webcal 日历订阅链接',
+          onclick: function () { showSubscription(); }
+        }, '复制订阅链接'),
         BOOT.readOnly ? null :
           C('button', { class: 'chip', type: 'button', onclick: function () { Panel.navigate('settings'); } }, '课表设置')));
 
@@ -403,15 +537,33 @@
     var ps = periods();
     var nowMin = nowMinutes();
     var nowRow = -1;
+    var layout = periodLayout(ps);
     ps.forEach(function (p, i) {
       if (isCurWeek && nowMin >= minutesOf(p.start) && nowMin < minutesOf(p.end)) nowRow = i;
     });
 
+    layout.separators.forEach(function (item) {
+      if (item.type === 'section') {
+        var label = item.section === 'morning' ? '上午' : item.section === 'afternoon' ? '下午' : '晚上';
+        grid.appendChild(C('div', {
+          class: 'kb-section kb-section-' + item.section,
+          dataset: { section: item.section },
+          style: { gridRow: String(item.row), gridColumn: '1 / -1' }
+        }, C('b', { text: label })));
+      } else {
+        grid.appendChild(C('div', {
+          class: 'kb-break',
+          dataset: { breakRow: String(item.row) },
+          style: { gridRow: String(item.row), gridColumn: '1 / -1' }
+        }, C('span', { text: item.minutes + ' 分钟' })));
+      }
+    });
+
     ps.forEach(function (p, i) {
-      var row = i + 2;
+      var row = layout.rows[p.n];
       grid.appendChild(C('div', {
         class: 'kb-slot' + (nowRow === i ? ' is-now' : ''),
-        dataset: { row: String(row) },
+        dataset: { row: String(row), periodIndex: String(i) },
         style: { gridRow: String(row), gridColumn: '1' }
       }, C('b', { text: p.n }), C('span', { text: p.start + '\n' + p.end })));
 
@@ -486,7 +638,8 @@
           class: 'kb-course',
           style: {
             '--c1': col[0], '--c2': col[1],
-            gridRow: (c.start + 1) + ' / span ' + (c.end - c.start + 1),
+            gridRow: layout.rows[c.start] + ' / span ' +
+              (layout.rows[c.end] - layout.rows[c.start] + 1),
             gridColumn: String(day + 1),
             width: 'calc(' + w + '% - 5px)',
             marginLeft: 'calc(' + (c._lane * w) + '% + 2px)',
@@ -499,15 +652,14 @@
         },
           C('div', { class: 'kb-course-name', text: c.name }),
           C('div', { class: 'kb-course-info' },
-            c.hideMeta
-              ? C('span', { class: 'kb-course-hint', text: '每位同学可能不同' })
-              : C('span', { text: c.place || '待定' })),
-          c.end - c.start > 1 || c._lanes > 1 ? C('div', { class: 'kb-course-sub', text: c.period + ' 节' }) : null);
+            C('span', { text: c.place || '待定' })),
+          C('div', {
+            class: 'kb-course-sub',
+            text: c.start === c.end ? c.start + ' 节' : c.start + '–' + c.end + ' 节'
+          }));
         grid.appendChild(card);
       });
     }
-
-    host.appendChild(C('div', { class: 'kb-extra', text: s.extra || '' }));
 
     todayHost = C('div', { class: 'kb-today-wrap' });
     todayHost.appendChild(buildToday(ps));
@@ -582,7 +734,7 @@
         C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,' + col[0] + ',' + col[1] + ')' } }),
         C('div', { class: 'today-main' },
           C('div', { class: 'today-name', text: c.name }),
-          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + (c.hideMeta ? '' : ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '')) })),
+          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '') })),
         C('span', { class: 'today-status ' + cls, text: status })));
     });
 
@@ -602,9 +754,56 @@
     ps.forEach(function (p, i) {
       if (isCurWeek && nowMin >= minutesOf(p.start) && nowMin < minutesOf(p.end)) row = i;
     });
+    var currentGridRow = row >= 0 ? periodGridRow(ps, ps[row].n) : -1;
     host.querySelectorAll('[data-row]').forEach(function (node) {
-      node.classList.toggle('is-now', row >= 0 && node.dataset.row === String(row + 2));
+      node.classList.toggle('is-now', currentGridRow >= 0 && node.dataset.row === String(currentGridRow));
     });
+    updateNowLine(ps, nowMin);
+  }
+
+  function updateNowLine(ps, nowMin) {
+    var grid = host.querySelector('.kb-grid');
+    var oldLine = host.querySelector('.kb-now-line');
+    var start = minutesOf(ps[0].start);
+    var end = minutesOf(ps[ps.length - 1].end);
+    var isCurWeek = viewWeek === 0 || viewWeek === currentWeek();
+    if (!grid || !isCurWeek || nowMin < start || nowMin > end) {
+      if (oldLine) oldLine.remove();
+      return;
+    }
+
+    var line = oldLine;
+    if (!line) {
+      line = C('div', { class: 'kb-now-line' });
+      grid.appendChild(line);
+    }
+
+    var gridTop = grid.getBoundingClientRect().top;
+    var activeIdx = -1;
+    ps.forEach(function (p, i) {
+      if (nowMin >= minutesOf(p.start) && nowMin < minutesOf(p.end)) activeIdx = i;
+    });
+
+    var top;
+    if (activeIdx >= 0) {
+      var slot = grid.querySelector('[data-period-index="' + activeIdx + '"]');
+      var rect = slot.getBoundingClientRect();
+      var active = ps[activeIdx];
+      var from = minutesOf(active.start), to = minutesOf(active.end);
+      top = rect.top - gridTop + (nowMin - from) / Math.max(1, to - from) * rect.height;
+    } else {
+      var prevIdx = -1, nextIdx = -1;
+      ps.forEach(function (p, i) {
+        if (minutesOf(p.end) <= nowMin) prevIdx = i;
+        if (nextIdx < 0 && minutesOf(p.start) > nowMin) nextIdx = i;
+      });
+      if (prevIdx < 0 || nextIdx < 0) { line.remove(); return; }
+      var prev = grid.querySelector('[data-period-index="' + prevIdx + '"]').getBoundingClientRect();
+      var next = grid.querySelector('[data-period-index="' + nextIdx + '"]').getBoundingClientRect();
+      top = (prev.bottom + next.top) / 2 - gridTop;
+    }
+
+    line.style.top = top.toFixed(1) + 'px';
   }
 
   /* ---- 课程详情 ---- */
@@ -623,9 +822,8 @@
 
     var rows = [
       ['周次', c.weekText || (c.weeks ? c.weeks.join(',') + '周' : '')],
-      c.hideMeta ? ['说明', '体育课每位同学的任课教师与场地可能不同，请以个人课表为准'] : null,
-      c.hideMeta ? null : ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
-      c.hideMeta ? null : ['教师', c.teacher || '—'],
+      ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
+      ['教师', c.teacher || '—'],
       ['考核方式', c.exam || '—'],
       ['学分', c.credit || '—'],
       ['总学时', c.hours || '—'],

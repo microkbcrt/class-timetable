@@ -81,9 +81,32 @@
     '🎉': 'check', '📋': 'list', '✅': 'check', '✏️': 'pencil', '🗑️': 'trash',
     '☕': 'timer', '🌙': 'moon', '☀️': 'sun'
   };
+  var BI_ICONS = {
+    calendar: 'bi-calendar3',
+    list: 'bi-list-ul',
+    timer: 'bi-stopwatch',
+    run: 'bi-person-walking',
+    book: 'bi-book',
+    gear: 'bi-gear',
+    moon: 'bi-moon-stars',
+    sun: 'bi-sun',
+    spark: 'bi-star',
+    box: 'bi-envelope-paper',
+    warn: 'bi-exclamation-triangle',
+    check: 'bi-check2-circle',
+    close: 'bi-x-lg',
+    info: 'bi-info-circle',
+    pencil: 'bi-pencil-square',
+    trash: 'bi-trash3',
+    chevronL: 'bi-chevron-left',
+    chevronR: 'bi-chevron-right',
+    plus: 'bi-plus-lg'
+  };
   function iconHtml(name) {
     if (!name) return null;
-    var key = ICONS[name] ? name : ICON_ALIAS[name];
+    var key = BI_ICONS[name] ? name : ICON_ALIAS[name];
+    if (BI_ICONS[key]) return '<i class="bi ' + BI_ICONS[key] + '" aria-hidden="true"></i>';
+    key = ICONS[name] ? name : ICON_ALIAS[name];
     return key ? SVG_ATTRS + ICONS[key] + '</svg>' : null;
   }
   function svgNode(name, cls) {
@@ -98,6 +121,16 @@
       return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     },
     pad: function (n) { return n < 10 ? '0' + n : '' + n; },
+    /* 统一切换深浅色：同步 data-theme + Bootstrap 的 data-bs-theme + 移动端主题色
+       （Bootstrap 5.3 组件底色/文字色由 data-bs-theme 决定，漏同步会残留浅底黑字） */
+    applyTheme: function (t) {
+      t = t === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = t;
+      document.documentElement.dataset.bsTheme = t;
+      var mc = document.querySelector('meta[name="theme-color"]');
+      if (mc) mc.setAttribute('content', t === 'dark' ? '#11161D' : '#EEF1F5');
+      return t;
+    },
     today: function (d) {
       d = d || new Date();
       return d.getFullYear() + '-' + util.pad(d.getMonth() + 1) + '-' + util.pad(d.getDate());
@@ -982,13 +1015,15 @@
 
     modal: function (opt) {
       opt = opt || {};
-      var body = el('div', { class: 'modal-body' });
+      var body = el('div', {
+        class: 'modal-body' + (opt.bodyClass ? ' ' + opt.bodyClass : '')
+      });
       append(body, typeof opt.body === 'function' ? opt.body() : opt.body);
 
       var foot = null;
       var close = function () { destroy(); };
 
-      var box = el('div', { class: 'modal' },
+      var box = el('div', { class: 'modal modal-content' },
         el('div', { class: 'modal-head' },
           el('h3', { text: opt.title || '' }),
           el('button', { class: 'modal-close', type: 'button', 'aria-label': '关闭', html: iconHtml('close') || '✕', onclick: close })),
@@ -1091,17 +1126,17 @@
       (opt.fields || []).forEach(function (f) {
         var input;
         if (f.type === 'select') {
-          input = el('select', { class: 'input', name: f.name });
+          input = el('select', { class: 'input form-select', name: f.name });
           (f.options || []).forEach(function (o) {
             var ov = typeof o === 'object' ? o.value : o;
             var ol = typeof o === 'object' ? o.label : o;
             input.appendChild(el('option', { value: ov, text: ol }));
           });
         } else if (f.type === 'textarea') {
-          input = el('textarea', { class: 'input', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
+          input = el('textarea', { class: 'input form-control', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
         } else {
           input = el('input', {
-            class: 'input', name: f.name, type: f.type || 'text',
+            class: 'input form-control', name: f.name, type: f.type || 'text',
             placeholder: f.placeholder || '', min: f.min, max: f.max, step: f.step
           });
         }
@@ -1319,14 +1354,16 @@
     var tabbar = document.getElementById('tabbar');
     clear(sidenav); clear(tabbar);
 
+    /* 只有一个模块时（公共课表站/单模块静态站）：底部导航无意义，交给 CSS 隐藏并回收底部留白 */
+    if (META.length <= 1) document.documentElement.setAttribute('data-solo', '1');
+
     META.forEach(function (meta) {
       sidenav.appendChild(el('button', {
         class: 'nav-item', type: 'button', dataset: { mod: meta.id },
         onclick: function () { navigate(meta.id); }
       },
         svgNode(meta.icon || '🧩', 'nav-icon'),
-        el('span', { text: meta.name }),
-        meta.description ? el('span', { class: 'nav-desc', text: meta.description.slice(0, 2) }) : null));
+        el('span', { text: meta.name })));
 
       tabbar.appendChild(el('button', {
         class: 'tab-item', type: 'button', dataset: { mod: meta.id },
@@ -1357,9 +1394,10 @@
       var light = document.documentElement.dataset.theme === 'light';
       btn.innerHTML = iconHtml(light ? 'sun' : 'moon') || (light ? '☀️' : '🌙');
     }
+    util.applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     btn.addEventListener('click', function () {
       var next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-      document.documentElement.dataset.theme = next;
+      util.applyTheme(next);
       try { localStorage.setItem('panel.theme', next); } catch (e) {}
       paint();
     });
