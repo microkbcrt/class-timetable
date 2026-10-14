@@ -253,10 +253,11 @@
   .kb-day b { font-size: 11px; }
   .kb-day span { font-size: 8.5px; }
   .kb-day .kb-badge { font-size: 7.5px; padding: 0 4px; }
-  .kb-week { flex: 1; }
-  .kb-week-select { min-width: 96px; flex: 1; }
-  .kb-week-text { min-width: 84px; }
+  .kb-week { flex: 1; flex-wrap: wrap; row-gap: 8px; min-width: 0; }
+  .kb-week-select { min-width: 0; flex: 1 1 72px; }
+  .kb-week-text { min-width: 0; flex: 0 1 auto; }
   .kb-week-text b { font-size: 15px; }
+  .kb-today-btn { flex: none; margin-left: auto; }
   .kb-bar { padding: 11px 12px; }
   .kb-tools {
     width: 100%;
