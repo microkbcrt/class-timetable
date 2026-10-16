@@ -68,6 +68,8 @@
     box: '<path d="M5.5 5h13l3.5 7v7H2v-7z"/><path d="M22 12h-6l-2 3h-4l-2-3H2"/>',
     warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    /* 圆形勾选按钮内的完成对勾：加粗圆头，几何居中（不要用 bi 字体图标，基线偏移会歪） */
+    checkBold: '<path stroke-width="3" d="M5.7 12.4l4.3 4.3L18.3 7.6"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
     pencil: '<path d="M17 3l4 4L8 20H4v-4z"/><path d="M14 6l4 4"/>',
