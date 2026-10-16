@@ -328,8 +328,7 @@
             });
             return false;
           }
-        },
-        { label: '关闭', class: 'btn-ghost' }
+        }
       ]
     });
   }
@@ -750,27 +749,9 @@
     Panel.ui.modal({
       title: '课程详情',
       body: [head, dl, (c.weeks && c.weeks.length > 1 ? C('div', { class: 'detail-label', text: '开课周次' }) : null), weekBadges],
-      actions: [
-        { label: '关闭', class: 'btn-ghost' },
-        BOOT.readOnly ? null : {
-          label: c.shared === false ? '✓ 个人选修 · 点击恢复公共' : '标为个人选修（不进公告）',
-          class: c.shared === false ? 'btn-primary' : 'btn-ghost',
-          onClick: function () {
-            var prev = c.shared;
-            var next = !(c.shared === false);
-            if (next) delete c.shared; else c.shared = false;
-            ctx.api.save(MOD, 'courses', c).then(function () {
-              Panel.ui.toast(next ? '已恢复为全班公共课（进公告）' : '已标为个人选修，发布公告时将排除', 'success');
-              render();
-            }).catch(function (e) {
-              if (prev === undefined) delete c.shared; else c.shared = prev;
-              Panel.ui.toast('保存失败：' + e.message, 'error');
-            });
-          }
-        },
-        BOOT.readOnly ? null :
-          { label: '打开设置', class: 'btn-primary', onClick: function () { Panel.navigate('settings'); } }
-      ].filter(Boolean)
+      actions: BOOT.readOnly ? null : [
+        { label: '打开设置', class: 'btn-primary', onClick: function () { Panel.navigate('settings'); } }
+      ]
     });
   }
 
