@@ -157,14 +157,29 @@
     return { kind: 'normal' };
   }
 
-  /* ---------------- 左右滑动切周（跟手拖动 + 松手滑出/回弹动画） ---------------- */
-  var slideDir = 0;      /* 下一次 render 的入场方向：1=新周从右入，-1=从左入 */
-  var dragMoved = false; /* 拖动过 → 抑制随后的课程卡片 click */
+  /* ---------------- 左右滑动切周 ----------------
+     自写 pointer 手势引擎在真机 WebView 上连修多版仍不可靠（触摸隐式捕获 / compositor
+     接管 / 出界事件 / 快滑打断，一坑接一坑），2026-10-17 先换原生 scroll-snap，同日
+     「手感实验室」三方案实测（同一真实课表：A 原生 snap / B Swiper / C Embla）后
+     按用户手感判定整体换成 Embla 8 分页：拖拽、动量、中途抓停全由 Embla 处理，
+     JS 只做 settle 后重建居中 + 拖后 click 抑制兜底。见 enableEmbla。 */
+  var slideDir = 0;      /* 下一次 render 的入场方向（仅箭头/概览回退用）：1=从右入，-1=从左入 */
+  var dragMoved = false; /* 鼠标拖卷过 → 抑制随后的课程卡片 click */
+  var quietGrid = false; /* 滑动落定后的重建：课程卡片不做入场动画（页面已由滚动就位） */
 
   function goWeek(dir) {
     var t = activeWeek() + dir;
-    if (t < 1) return;
-    slideDir = dir;
+    if (t < 1 || t > weekOptions().length) return;
+    if (!doc.settings.showAllWeeks && emblaInst && curPageWeeks.length >= 2) {
+      var i = curPageWeeks.indexOf(activeWeek());
+      /* 全周渲染后窗口就是 1-20 周：除首尾外始终有邻页，箭头走 Embla 原生平滑翻页
+         （settle 走 syncChrome 轻更新，与手指滑动完全一致） */
+      if (i >= 0 && (dir > 0 ? i < curPageWeeks.length - 1 : i > 0)) {
+        if (dir > 0) emblaInst.scrollNext(); else emblaInst.scrollPrev();
+        return;
+      }
+    }
+    slideDir = dir;                              /* 概览模式/边界回退：保留入场动画 */
     viewWeek = t;
     render();
   }
@@ -202,53 +217,93 @@
     return periodLayout(ps).rows[n];
   }
 
-  function enableSwipe(el) {
-    var startX = 0, startY = 0, dx = 0;
-    var dragging = false, decided = false;
+  /* ---- 横向切周控制器（Embla 8，2026-10-17 第五版）----
+     手机上「手感实验室」（lab.html：同一张真实课表三栏 A 原生 snap / B Swiper / C Embla）
+     实测用户判定：Embla 手感最爽、Swiper 次之、原生 snap 平庸 → 换 Embla。
+     结构：.kb-scroll=视口(overflow:hidden)，.kb-track=container，.kb-page=slide；
+     触摸/鼠标拖拽与动量、中途抓停全由 Embla 自己的物理处理（自写鼠标拖卷引擎删除）。
+     JS 只做两件事：① settle（动量+吸附完全结束）读当前页 → 静默重建居中；
+     ② pointer 轨迹 >6px 时置 dragMoved 兜底抑制课程卡 click（双保险，Embla 自带 click 防误触）。 */
+  var emblaInst = null;      /* 当前 render 的 Embla 实例（每次 render 重建、旧的销毁） */
+  var curPageWeeks = [];     /* 当前 embla 窗口内的周次（与页序对齐），供 goWeek 边界判断 */
 
-    el.addEventListener('pointerdown', function (e) {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      startX = e.clientX; startY = e.clientY;
-      dx = 0; dragging = true; decided = false; dragMoved = false;
-      el.classList.remove('kb-drag-anime');
-      el.classList.remove('kb-in-next', 'kb-in-prev');   /* 防入场动画残留锁住 transform */
-    });
+  function loadEmbla(cb) {
+    if (window.EmblaCarousel) return cb();
+    var s = document.createElement('script');
+    s.src = 'assets/vendor/embla/embla-carousel.umd.js';
+    s.onload = cb;
+    document.head.appendChild(s);
+  }
 
-    el.addEventListener('pointermove', function (e) {
-      if (!dragging) return;
-      var mx = e.clientX - startX, my = e.clientY - startY;
-      if (!decided) {
-        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
-        decided = true;
-        if (Math.abs(my) > Math.abs(mx)) { dragging = false; return; }  /* 垂直手势交给滚动 */
-        try { el.setPointerCapture(e.pointerId); } catch (err) {}
-        el.classList.add('kb-dragging');
-      }
-      if (!dragging) return;
-      dx = mx * 0.85;                                    /* 跟手阻尼 */
-      if (dx > 0 && activeWeek() <= 1) dx *= 0.3;        /* 第 1 周再右拖 → 强阻尼 */
-      el.style.transform = 'translateX(' + dx + 'px)';
-      dragMoved = Math.abs(dx) > 6;
-      if (e.cancelable) e.preventDefault();
-    });
-
-    function end() {
-      if (!dragging) return;
-      dragging = false;
-      el.classList.remove('kb-dragging');
-      var dir = dx < 0 ? 1 : -1;                          /* 左拖=下一周 */
-      if (decided && Math.abs(dx) > 90 && activeWeek() + dir >= 1) {
-        el.classList.add('kb-drag-anime');
-        el.style.transform = 'translateX(' + (dir > 0 ? '-55%' : '55%') + ')';  /* 滑出 */
-        setTimeout(function () { slideDir = dir; viewWeek = activeWeek() + dir; render(); }, 140);
-        return;
-      }
-      el.classList.add('kb-drag-anime');                 /* 阈值内回弹 */
-      el.style.transform = '';
-      setTimeout(function () { el.classList.remove('kb-drag-anime'); dragMoved = false; }, 220);
+  function enableEmbla(scroll, week, weeks) {
+    curPageWeeks = weeks;
+    if (weeks.length < 2) return;
+    function boot() {
+      if (emblaInst) { try { emblaInst.destroy(); } catch (e) {} emblaInst = null; }
+      var idx = Math.max(0, weeks.indexOf(week));
+      scroll.classList.add('kb-embla');        /* 触发 .kb-track will-change: transform（常驻合成层） */
+      emblaInst = EmblaCarousel(scroll, {
+        align: 'start', startIndex: idx,
+        loop: false, containScroll: false, dragFree: false, skipSnaps: false
+      });
+      emblaInst.on('settle', function () {
+        if (!emblaInst) return;
+        var i = emblaInst.selectedScrollSnap();
+        var page = scroll.querySelectorAll('.kb-page')[i];
+        var w = page ? Number(page.getAttribute('data-w')) : 0;
+        if (!w || w === activeWeek()) return;
+        viewWeek = w;
+        syncChrome(w);                           /* 轻更新周条/节数/now 线，DOM 与实例不动 */
+      });
+      /* 拖动过 → 抑制随后的课程卡 click（每手势起点复位） */
+      var sx = 0, moved = false, pid = -1;
+      scroll.addEventListener('pointerdown', function (e) { sx = e.clientX; moved = false; pid = e.pointerId; }, true);
+      scroll.addEventListener('pointermove', function (e) {
+        if (e.pointerId === pid && Math.abs(e.clientX - sx) > 6) moved = true;
+      }, true);
+      scroll.addEventListener('pointerup', function () {
+        if (moved) { dragMoved = true; setTimeout(function () { dragMoved = false; }, 160); }
+        pid = -1; moved = false;
+      }, true);
     }
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
+    if (window.EmblaCarousel) boot(); else loadEmbla(boot);
+  }
+
+  /* 当前视角周对应网格（全周渲染后 host 里有 20 个 .kb-grid，now 高亮/now 线只挂视角页） */
+  function activeGrid() {
+    return host.querySelector('.kb-page[data-w="' + activeWeek() + '"] .kb-grid');
+  }
+
+  /* 滑动落定后的周条轻更新：只改文案/下拉值/回到本周按钮/节数，不重建 DOM 也不动 embla */
+  function syncChrome(w) {
+    var now = new Date();
+    var weekStart = U.addDays(U.mondayOf(now), (w - currentWeek()) * 7);
+    var bar = host.querySelector('.kb-bar');
+    if (bar) {
+      var txt = bar.querySelector('.kb-week-text');
+      if (txt) {
+        var b = txt.querySelector('b');
+        if (b) b.textContent = '第 ' + w + ' 周';
+        var span = txt.querySelector('span');
+        if (span) span.textContent = U.fmtDate(weekStart) + ' - ' + U.fmtDate(U.addDays(weekStart, 6));
+      }
+      var sel = bar.querySelector('.kb-week-select');
+      if (sel) sel.value = String(w);
+      var isCur = w === currentWeek();
+      var todayBtn = bar.querySelector('.kb-today-btn');
+      if (isCur) { if (todayBtn) todayBtn.remove(); }
+      else if (!todayBtn) {
+        var tools = bar.querySelector('.kb-tools');
+        if (tools) tools.appendChild(C('button', {
+          class: 'chip kb-today-btn', type: 'button',
+          onclick: function () { viewWeek = 0; render(); }
+        }, '回到本周'));
+      }
+    }
+    var visible = doc.courses.filter(function (c) { return inWeek(c, w); });
+    var note = host.querySelector('.kb-extra-note');
+    if (note) note.textContent = '本周 ' + visible.length + ' 节课';
+    updateNow();
   }
 
   function subscriptionUrls() {
@@ -340,16 +395,8 @@
     var s = doc.settings;
     var week = activeWeek();
     var now = new Date();
-    var todayIdx = (now.getDay() + 6) % 7;
     var weekStart = U.addDays(U.mondayOf(now), (week - currentWeek()) * 7);
-    var isCurWeek = week === currentWeek();
     var visible = doc.courses.filter(function (c) { return inWeek(c, week); });
-
-    /* 每列日期的显示方案（调休补课 / 放假）；全部周概览时不套用调休方案 */
-    var plans = [];
-    for (var pi = 0; pi < 7; pi++) {
-      plans.push(s.showAllWeeks ? { kind: 'normal' } : planFor(U.today(U.addDays(weekStart, pi))));
-    }
 
     var bar = C('div', { class: 'card kb-bar' },
       C('div', { class: 'kb-week' },
@@ -371,11 +418,7 @@
         C('div', { class: 'kb-week-text' },
           C('b', { text: '第 ' + week + ' 周' }),
           C('span', { text: U.fmtDate(weekStart) + ' - ' + U.fmtDate(U.addDays(weekStart, 6)) })),
-        C('button', { class: 'kb-arrow', type: 'button', title: '下一周', html: Panel.iconHtml('chevronR'), onclick: function () { goWeek(1); } }),
-        isCurWeek ? null : C('button', {
-          class: 'chip kb-today-btn', type: 'button',
-          onclick: function () { viewWeek = 0; render(); }
-        }, '回到本周')),
+        C('button', { class: 'kb-arrow', type: 'button', title: '下一周', html: Panel.iconHtml('chevronR'), onclick: function () { goWeek(1); } })),
       C('div', { class: 'kb-tools' },
         C('button', {
           class: 'chip' + (s.showAllWeeks ? ' active' : ''), type: 'button',
@@ -390,7 +433,13 @@
           onclick: function () { showSubscription(); }
         }, '日历订阅'),
         BOOT.readOnly ? null :
-          C('button', { class: 'chip', type: 'button', onclick: function () { Panel.navigate('settings'); } }, '课表设置')));
+          C('button', { class: 'chip', type: 'button', onclick: function () { Panel.navigate('settings'); } }, '课表设置'),
+        /* 工具行在手机端是不换行的横向滚动行：回到本周放这里（margin-left:auto 靠右），
+           出现/消失只横向伸缩，不会像挤在周条里那样顶高一整行 */
+        week === currentWeek() ? null : C('button', {
+          class: 'chip kb-today-btn', type: 'button',
+          onclick: function () { viewWeek = 0; render(); }
+        }, '回到本周')));
 
     host.appendChild(bar);
 
@@ -403,19 +452,58 @@
       C('span', { class: 'dot', text: '·' }),
       C('span', { class: 'kb-extra-note', text: '本周 ' + visible.length + ' 节课' })));
 
-    /* ---- 课表格子 ---- */
+    /* ---- 课表格子 ----
+       滑动切周 = Embla 分页（第五版，手感实验室实测用户选定），并按用户建议
+       1-20 周全部预渲染成 slides（1.0.19）：
+       滑动/惯性全程纯合成，settle 后只轻更新周条文案（syncChrome），
+       不再整棵重建 DOM —— 彻底消灭快甩跟不上的掉帧。 */
     var scroll = C('div', { class: 'card kb-scroll' });
-    var grid = C('div', { class: 'kb-grid' });
-    scroll.appendChild(grid);
+    var track = C('div', { class: 'kb-track' });
+    scroll.appendChild(track);
     host.appendChild(scroll);
-    if (slideDir) {
-      var inClass = slideDir > 0 ? 'kb-in-next' : 'kb-in-prev';
-      grid.classList.add(inClass);
-      slideDir = 0;
-      /* 动画结束立即摘掉：fill both 的 transform 会压过拖动的 inline transform */
-      grid.addEventListener('animationend', function () { grid.classList.remove(inClass); }, { once: true });
+    var pageWeeks = s.showAllWeeks ? [week] : weekOptions().slice();
+    pageWeeks.forEach(function (w) {
+      var page = C('div', { class: 'kb-page', 'data-w': w });
+      var grid = C('div', { class: 'kb-grid' });
+      page.appendChild(grid);
+      track.appendChild(page);
+      if (w !== week || quietGrid) grid.classList.add('kb-quiet');   /* 邻页/落定重建：卡片不播入场动画 */
+      if (slideDir && w === week) {
+        var inClass = slideDir > 0 ? 'kb-in-next' : 'kb-in-prev';
+        grid.classList.add(inClass);
+        /* 动画结束立即摘掉：fill both 的 transform 会压过后续 transform */
+        grid.addEventListener('animationend', function () { grid.classList.remove(inClass); }, { once: true });
+      }
+      buildGrid(grid, w);
+    });
+    slideDir = 0;
+    quietGrid = false;
+    if (!s.showAllWeeks) enableEmbla(scroll, week, pageWeeks);
+    else if (emblaInst) { try { emblaInst.destroy(); } catch (e) {} emblaInst = null; }
+
+    todayHost = C('div', { class: 'kb-today-wrap' });
+    todayHost.appendChild(buildToday(periods()));
+    host.appendChild(todayHost);
+    updateNow();
+  }
+
+  /**
+   * 渲染一周的课表格子（render 的网格部分；拖动时预渲染相邻周也复用。
+   * 只含节次网格本体：表头/节次列/课程卡，不含顶部周条与今日卡片）。
+   */
+  function buildGrid(grid, week) {
+    var showAll = !!doc.settings.showAllWeeks;
+    var now = new Date();
+    var todayIdx = (now.getDay() + 6) % 7;
+    var weekStart = U.addDays(U.mondayOf(now), (week - currentWeek()) * 7);
+    var isCurWeek = week === currentWeek();
+    var visible = doc.courses.filter(function (c) { return inWeek(c, week); });
+
+    /* 每列日期的显示方案（调休补课 / 放假）；全部周概览时不套用调休方案 */
+    var plans = [];
+    for (var pi = 0; pi < 7; pi++) {
+      plans.push(showAll ? { kind: 'normal' } : planFor(U.today(U.addDays(weekStart, pi))));
     }
-    if (!s.showAllWeeks) enableSwipe(grid);
 
     grid.appendChild(C('div', { class: 'kb-corner', text: '节次', style: { gridRow: '1', gridColumn: '1' } }));
     for (var d = 1; d <= 7; d++) {
@@ -429,7 +517,7 @@
         style: { gridRow: '1', gridColumn: String(d + 1) }
       },
         C('b', { text: DAY_CN[d - 1] }),
-        s.showAllWeeks ? null : C('span', { text: U.fmtDate(date) }),
+        showAll ? null : C('span', { text: U.fmtDate(date) }),
         dpl.kind !== 'normal'
           ? C('span', { class: 'kb-badge' + (dpl.tone === 'off' ? ' kb-badge-off' : dpl.tone === 'rev' ? ' kb-badge-rev' : ''), text: dpl.badge })
           : null));
@@ -561,11 +649,6 @@
         grid.appendChild(card);
       });
     }
-
-    todayHost = C('div', { class: 'kb-today-wrap' });
-    todayHost.appendChild(buildToday(ps));
-    host.appendChild(todayHost);
-    updateNow();
   }
 
   /* 重建今日课程卡片（含倒计时 / 进行中 / 已上完状态），供定时刷新调用 */
@@ -656,28 +739,26 @@
       if (isCurWeek && nowMin >= minutesOf(p.start) && nowMin < minutesOf(p.end)) row = i;
     });
     var currentGridRow = row >= 0 ? periodGridRow(ps, ps[row].n) : -1;
-    host.querySelectorAll('[data-row]').forEach(function (node) {
-      node.classList.toggle('is-now', currentGridRow >= 0 && node.dataset.row === String(currentGridRow));
-    });
+    host.querySelectorAll('.is-now[data-row]').forEach(function (node) { node.classList.remove('is-now'); });
+    var grid = activeGrid();
+    if (grid && currentGridRow >= 0) {
+      grid.querySelectorAll('[data-row]').forEach(function (node) {
+        if (node.dataset.row === String(currentGridRow)) node.classList.add('is-now');
+      });
+    }
     updateNowLine(ps, nowMin);
   }
 
   function updateNowLine(ps, nowMin) {
-    var grid = host.querySelector('.kb-grid');
-    var oldLine = host.querySelector('.kb-now-line');
+    host.querySelectorAll('.kb-now-line').forEach(function (l) { l.remove(); });
+    var grid = activeGrid();
     var start = minutesOf(ps[0].start);
     var end = minutesOf(ps[ps.length - 1].end);
     var isCurWeek = viewWeek === 0 || viewWeek === currentWeek();
-    if (!grid || !isCurWeek || nowMin < start || nowMin > end) {
-      if (oldLine) oldLine.remove();
-      return;
-    }
+    if (!grid || !isCurWeek || nowMin < start || nowMin > end) return;
 
-    var line = oldLine;
-    if (!line) {
-      line = C('div', { class: 'kb-now-line' });
-      grid.appendChild(line);
-    }
+    var line = C('div', { class: 'kb-now-line' });
+    grid.appendChild(line);
 
     var gridTop = grid.getBoundingClientRect().top;
     var activeIdx = -1;

@@ -1005,6 +1005,16 @@
     /* 是否有弹窗（含编辑表单）打开：用于避免后台自动刷新覆盖正在编辑的内容 */
     hasOpenModal: function () { return modalStack.length > 0; },
 
+    /* 关闭最上层弹窗（Android 返回键用）。返回 false = 当前没有弹窗。
+       不可关闭的弹窗（dismissible:false）拦住返回键但不关闭 */
+    closeTopModal: function () {
+      if (!modalStack.length) return false;
+      var top = modalStack[modalStack.length - 1];
+      if (top.dismissible === false) return true;
+      try { top.close(); } catch (e) {}
+      return true;
+    },
+
     toast: function (msg, type) {
       var t = el('div', { class: 'toast ' + (type || 'info') },
         svgNode(type === 'success' ? 'check' : type === 'error' ? 'close' : 'info', 'toast-icon'), msg);
@@ -1068,7 +1078,7 @@
       modalRoot.appendChild(overlay);
       document.addEventListener('keydown', onKey);
 
-      var handle = { close: close, root: overlay, body: body, box: box };
+      var handle = { close: close, root: overlay, body: body, box: box, dismissible: opt.dismissible !== false };
       modalStack.push(handle);
 
       setTimeout(function () {
@@ -1349,6 +1359,15 @@
       toast: ui.toast
     };
   }
+
+  /* ---------------- 返回键（Android 原生壳调用） ----------------
+     只负责关弹窗（模块切换不算层级，2026-10-17 按用户反馈去掉逐级回退——
+     切了 4 个模块想退出就得按 6 次）。关不了弹窗就交回原生壳：
+     Toast「再按一次退出」，2.5 秒内再按才退出（共 2 次）。 */
+  function backAction() {
+    return ui.closeTopModal();
+  }
+  window.__panelBack = function () { return backAction() ? 1 : 0; };
 
   /* ---------------- 外壳渲染 ---------------- */
   function buildNav() {

@@ -31,6 +31,8 @@
 .kb-today-btn {
   color: var(--brand1);
   border-color: color-mix(in srgb, var(--brand1) 35%, transparent);
+  /* 在工具行内靠右：出现/消失不挤动其他工具，也不改变行高（防整页上下跳） */
+  margin-left: auto;
 }
 .kb-subscribe-note {
   margin: 0;
@@ -64,10 +66,20 @@
 .kb-meta .dot { opacity: .5; }
 .kb-extra-note { margin-left: auto; color: var(--brand1); font-size: 11.5px; }
 
-/* ---- 网格 ---- */
+/* ---- 网格 ----
+   滑动切周：每周整页是 Embla slide（kb-page），kb-scroll 只做 Embla 视口裁剪，
+   padding 移到页内（页间由页 padding 自然给出 gutter，页数仅当前周 ±1 共 3 页，
+   无需 content-visibility 优化，摘掉以保证 Embla 首测尺寸精确） */
 .kb-scroll {
-  overflow-x: auto; overflow-y: hidden; padding: 12px;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden; padding: 0;                /* 滚动/动量由 Embla 处理，容器只裁剪 */
+}
+.kb-track { display: flex; align-items: stretch; }
+.kb-scroll.kb-embla .kb-track { will-change: transform; }   /* 整条 slide 轨道常驻合成层：拖拽逐帧 transform 不再过主线程 */
+.kb-page {
+  flex: 0 0 100%; min-width: 0;
+  box-sizing: border-box; padding: 12px;
+  /* 失效门：任何样式/重画都只在单页内打转，不波及全 20 页（全周渲染后的关键保护） */
+  contain: layout paint style;
 }
 .kb-grid {
   --kb-label-col: 54px;
@@ -82,8 +94,12 @@
   min-width: 780px;
 }
 
+/* 注意：这里绝不能再用 position:sticky（2026-10-17 摘除）——snap 三页共用同一个
+   横向滚动容器，sticky 会把滑走页面的节次列钉在视口左缘（用户实测「表头不跟滑」），
+   且每帧参与合成拖慢甩动。横排网格比卡片窄（桌面 780 ≤ 页宽、手机 min-width:0），
+   本就不需要钉列。z-index 保留，压在课程卡之上。 */
 .kb-corner, .kb-slot {
-  position: sticky; left: 0; z-index: 6;
+  z-index: 6;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px; border-radius: 11px; font-size: 11px; color: var(--muted);
   background: var(--panel-2); border: 1px solid transparent;
@@ -160,12 +176,14 @@
 }
 
 .kb-cell {
-  border-radius: 11px; background: var(--panel-2); opacity: .55;
+  border-radius: 11px;
+  /* 透明度改为预混色：opacity<1 的每个元素都会拖慢合成光栅，一页几十个代价显著 */
+  background: color-mix(in srgb, var(--panel-2) 55%, transparent);
 }
-.kb-cell.is-today { background: color-mix(in srgb, var(--brand1) 8%, var(--panel-2)); opacity: 1; }
+.kb-cell.is-today { background: color-mix(in srgb, var(--brand1) 8%, var(--panel-2)); }
 .kb-cell.is-now { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand1) 45%, transparent); }
-.kb-cell.is-override { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand1) 24%, transparent); opacity: .8; }
-.kb-cell.is-override.is-off { box-shadow: none; opacity: .3; }
+.kb-cell.is-override { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand1) 24%, transparent); background: color-mix(in srgb, var(--panel-2) 80%, transparent); }
+.kb-cell.is-override.is-off { box-shadow: none; background: color-mix(in srgb, var(--panel-2) 30%, transparent); }
 
 .kb-now-line {
   position: absolute; z-index: 10;
@@ -187,6 +205,11 @@
 @keyframes kbIn { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
 .kb-course:hover { transform: scale(1.02); }
 .kb-course:active { transform: scale(.98); }
+
+/* 触摸端（手机）：hover/active 缩放在拖拽起手时也会触发，白白多一次整卡重光栅，禁掉 */
+@media (hover: none) {
+  .kb-course:hover, .kb-course:active { transform: none; }
+}
 .kb-course-name {
   font-size: 12.5px; font-weight: 700; line-height: 1.25;
   overflow-wrap: anywhere;
@@ -226,7 +249,7 @@
 
 /* 平板与手机：列宽压缩到屏幕宽度内，禁止横向滚动 */
 @media (max-width: 980px) {
-  .kb-scroll { overflow-x: hidden; padding: 8px; }
+  .kb-page { padding: 8px; }
   .kb-grid {
     --kb-label-col: 38px;
     grid-template-columns: var(--kb-label-col) repeat(7, minmax(0, 1fr));
@@ -244,7 +267,7 @@
       24px repeat(3, 68px);
     gap: 3px; min-width: 0;
   }
-  .kb-scroll { padding: 6px; }
+  .kb-page { padding: 6px; }
   .kb-corner { font-size: 10px; }
   .kb-slot { gap: 1px; padding: 0 1px; }
   .kb-slot b { font-size: 11.5px; }
@@ -257,7 +280,7 @@
   .kb-week-select { min-width: 0; flex: 1 1 72px; }
   .kb-week-text { min-width: 0; flex: 0 1 auto; }
   .kb-week-text b { font-size: 15px; }
-  .kb-today-btn { flex: none; margin-left: auto; }
+  .kb-today-btn { flex: none; }   /* margin-left:auto 已在基础规则，靠右即可 */
   .kb-bar { padding: 11px 12px; }
   .kb-tools {
     width: 100%;
@@ -287,10 +310,16 @@
 }
 
 /* ---- 左右滑动切周（跟手拖动 / 松手滑出、回弹 / 新周滑入） ---- */
-.kb-grid { touch-action: pan-y; cursor: grab; }
-.kb-grid.kb-dragging { cursor: grabbing; }
-.kb-grid.kb-drag-anime { transition: transform .16s ease; }
+/* 触摸手势完全交给原生 snap 滚动：不限 touch-action（pan-y 会禁止原生横滑）；
+   cursor 提示桌面鼠标可拖。拖动/抓取态光标由 JS inline 设置 */
+.kb-grid { touch-action: auto; cursor: grab; }
 @keyframes kb-in-next { from { transform: translateX(42%); opacity: .25; } to { transform: none; opacity: 1; } }
 @keyframes kb-in-prev { from { transform: translateX(-42%); opacity: .25; } to { transform: none; opacity: 1; } }
 .kb-grid.kb-in-next { animation: kb-in-next .22s ease both; }
 .kb-grid.kb-in-prev { animation: kb-in-prev .22s ease both; }
+
+/* ---- 换周噪声抑制 ----
+   滑动切周是 Embla 分页（1.0.18）：kb-scroll 为视口、kb-page 为 slide，
+   拖动/快滑/惯性/中途抓停全由 Embla 处理；自写手势引擎与原生 snap 版
+   （ghost/仲裁/rAF transform/scrollend 结算）均已删除。 */
+.kb-grid.kb-quiet .kb-course { animation: none; }   /* 滑动提交后的渲染：卡片不再浮现 */
