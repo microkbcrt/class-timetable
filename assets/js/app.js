@@ -102,7 +102,16 @@
     trash: 'bi-trash3',
     chevronL: 'bi-chevron-left',
     chevronR: 'bi-chevron-right',
-    plus: 'bi-plus-lg'
+    plus: 'bi-plus-lg',
+    upload: 'bi-cloud-arrow-up',
+    download: 'bi-cloud-arrow-down',
+    reset: 'bi-arrow-counterclockwise',
+    skip: 'bi-skip-forward-fill',
+    battery: 'bi-battery-charging',
+    phone: 'bi-phone',
+    bell: 'bi-bell-fill',
+    send: 'bi-send',
+    pulse: 'bi-heart-pulse-fill'
   };
   function iconHtml(name) {
     if (!name) return null;
@@ -123,14 +132,16 @@
       return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     },
     pad: function (n) { return n < 10 ? '0' + n : '' + n; },
-    /* 统一切换深浅色：同步 data-theme + Bootstrap 的 data-bs-theme + 移动端主题色
-       （Bootstrap 5.3 组件底色/文字色由 data-bs-theme 决定，漏同步会残留浅底黑字） */
+    /* 统一切换深浅色：同步 data-theme + 移动端主题色 */
     applyTheme: function (t) {
       t = t === 'light' ? 'light' : 'dark';
       document.documentElement.dataset.theme = t;
-      document.documentElement.dataset.bsTheme = t;
       var mc = document.querySelector('meta[name="theme-color"]');
       if (mc) mc.setAttribute('content', t === 'dark' ? '#11161D' : '#EEF1F5');
+      /* daisyUI 主题也认 [data-theme]，但 swap 里的 theme-controller 勾选态必须同步，
+         否则 :root:has(...:checked) 会与 [data-theme] 打架（勾选态特异性更高） */
+      var swap = document.getElementById('theme-toggle');
+      if (swap) swap.checked = t === 'dark';
       return t;
     },
     today: function (d) {
@@ -159,11 +170,11 @@
       if (!dateStr) return null;
       var a = util.parseDate(dateStr), b = util.parseDate(util.today());
       var diff = Math.round((a - b) / 86400000);
-      if (diff === 0) return { text: '今天', cls: 'badge-warn' };
-      if (diff === 1) return { text: '明天', cls: 'badge-brand' };
-      if (diff === -1) return { text: '已逾期', cls: 'badge-danger' };
-      if (diff < 0) return { text: '逾期 ' + (-diff) + ' 天', cls: 'badge-danger' };
-      if (diff <= 7) return { text: diff + ' 天后', cls: 'badge-ok' };
+      if (diff === 0) return { text: '今天', cls: 'badge-warning badge-soft' };
+      if (diff === 1) return { text: '明天', cls: 'badge-primary' };
+      if (diff === -1) return { text: '已逾期', cls: 'badge-error badge-soft' };
+      if (diff < 0) return { text: '逾期 ' + (-diff) + ' 天', cls: 'badge-error badge-soft' };
+      if (diff <= 7) return { text: diff + ' 天后', cls: 'badge-success badge-soft' };
       return { text: (a.getMonth() + 1) + '/' + a.getDate(), cls: '' };
     },
     mmss: function (sec) {
@@ -1015,16 +1026,24 @@
       return true;
     },
 
+    /* daisyUI alert 气泡；#toast-root 是 popover=manual —— 弹窗(dialog)在 top layer，
+       toast 必须同样进 top layer 才不会被遮罩压暗（后进 top layer 者在上） */
     toast: function (msg, type) {
-      var t = el('div', { class: 'toast ' + (type || 'info') },
-        svgNode(type === 'success' ? 'check' : type === 'error' ? 'close' : 'info', 'toast-icon'), msg);
+      var t = el('div', { class: 'alert alert-' + (type || 'info') },
+        svgNode(type === 'success' ? 'check' : type === 'error' ? 'close' : 'info', 'icon'), msg);
       toastRoot.appendChild(t);
+      if (toastRoot.showPopover) { try { toastRoot.showPopover(); } catch (e) {} }
       setTimeout(function () {
         t.classList.add('out');
-        setTimeout(function () { t.remove(); }, 320);
+        setTimeout(function () {
+          t.remove();
+          if (!toastRoot.children.length && toastRoot.hidePopover) { try { toastRoot.hidePopover(); } catch (e) {} }
+        }, 320);
       }, 2400);
     },
 
+    /* daisyUI 弹窗：<dialog class="modal"> 原生提供遮罩、Esc 关闭与顶层聚焦；
+       面板结构类 .modal-head/.modal-body/.modal-foot 在 .modal-box 内沿用 */
     modal: function (opt) {
       opt = opt || {};
       var body = el('div', {
@@ -1032,17 +1051,19 @@
       });
       append(body, typeof opt.body === 'function' ? opt.body() : opt.body);
 
-      var foot = null;
-      var close = function () { destroy(); };
+      var closeBtn = el('button', {
+        class: 'btn btn-circle btn-ghost btn-sm', type: 'button', 'aria-label': '关闭',
+        html: iconHtml('close'), onclick: function () { close(); }
+      });
 
-      var box = el('div', { class: 'modal modal-content' },
+      var box = el('div', { class: 'modal-box' },
         el('div', { class: 'modal-head' },
           el('h3', { text: opt.title || '' }),
-          el('button', { class: 'modal-close', type: 'button', 'aria-label': '关闭', html: iconHtml('close') || '✕', onclick: close })),
+          closeBtn),
         body);
 
       if (opt.actions && opt.actions.length) {
-        foot = el('div', { class: 'modal-foot' });
+        var foot = el('div', { class: 'modal-foot' });
         opt.actions.forEach(function (a) {
           var btn = el('button', {
             type: 'button',
@@ -1057,28 +1078,32 @@
         box.appendChild(foot);
       }
 
-      var overlay = el('div', {
-        class: 'modal-overlay',
-        onmousedown: function (e) { if (e.target === overlay && opt.dismissible !== false) close(); }
-      }, box);
+      var dlg = el('dialog', { class: 'modal modal-bottom sm:modal-middle' }, box);
+      var handle = { close: close, root: dlg, body: body, box: box, dismissible: opt.dismissible !== false };
 
-      function onKey(e) {
-        if (e.key === 'Escape' && modalStack[modalStack.length - 1] === handle && opt.dismissible !== false) {
-          close();
-        }
-      }
-
-      function destroy() {
-        document.removeEventListener('keydown', onKey);
-        overlay.remove();
+      function cleanup() {
+        dlg.remove();
         modalStack = modalStack.filter(function (m) { return m !== handle; });
         if (opt.onClose) opt.onClose();
       }
+      function close() {
+        if (dlg.open) { try { dlg.close(); } catch (e) { cleanup(); } }
+        else cleanup();
+      }
 
-      modalRoot.appendChild(overlay);
-      document.addEventListener('keydown', onKey);
+      /* onClose 只走 dialog 的 close 事件一条路（Esc/cancel/程序关闭都汇到这里） */
+      dlg.addEventListener('close', cleanup);
+      dlg.addEventListener('cancel', function (e) {
+        if (opt.dismissible === false) e.preventDefault();
+      });
+      /* 点击遮罩关闭：dialog 自身被点到 = 遮罩区域 */
+      dlg.addEventListener('mousedown', function (e) {
+        if (e.target === dlg && opt.dismissible !== false) close();
+      });
 
-      var handle = { close: close, root: overlay, body: body, box: box, dismissible: opt.dismissible !== false };
+      modalRoot.appendChild(dlg);
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
       modalStack.push(handle);
 
       setTimeout(function () {
@@ -1102,7 +1127,7 @@
             { label: '取消', class: 'btn-ghost', onClick: function () { done = true; resolve(false); } },
             {
               label: opt.okText || '确定',
-              class: opt.danger ? 'btn-danger' : 'btn-primary',
+              class: opt.danger ? 'btn-error' : 'btn-primary',
               onClick: function () { done = true; resolve(true); }
             }
           ]
@@ -1115,18 +1140,21 @@
       return el('div', { class: 'empty' },
         iconHtml(icon)
           ? el('div', { class: 'empty-icon', html: iconHtml(icon) })
-          : el('div', { class: 'empty-icon', text: icon || '📭' }),
+          : el('div', { class: 'empty-icon', text: icon || '·' }),
         el('div', { class: 'empty-text', text: text || '暂无内容' }),
         hint ? el('div', { class: 'empty-hint', text: hint }) : null);
     },
 
     loading: function (text) {
-      return el('div', { class: 'loading' }, el('div', { class: 'spinner' }), el('div', { text: text || '加载中…' }));
+      return el('div', { class: 'loading-block' },
+        el('span', { class: 'loading loading-spinner text-primary' }),
+        el('div', { text: text || '加载中…' }));
     },
 
+    /* daisyUI 原生 <progress>：value/max 驱动，样式跟随主题变量 */
     progress: function (percent) {
       var p = Math.max(0, Math.min(100, Number(percent) || 0));
-      return el('div', { class: 'progress' }, el('i', { style: { width: p.toFixed(1) + '%' } }));
+      return el('progress', { class: 'progress progress-primary', max: 100, value: p });
     },
 
     /** 表单弹窗：fields = [{name,label,type,value,required,placeholder,options,min,max,step,rows}]
@@ -1138,17 +1166,17 @@
       (opt.fields || []).forEach(function (f) {
         var input;
         if (f.type === 'select') {
-          input = el('select', { class: 'input form-select', name: f.name });
+          input = el('select', { class: 'select', name: f.name });
           (f.options || []).forEach(function (o) {
             var ov = typeof o === 'object' ? o.value : o;
             var ol = typeof o === 'object' ? o.label : o;
             input.appendChild(el('option', { value: ov, text: ol }));
           });
         } else if (f.type === 'textarea') {
-          input = el('textarea', { class: 'input form-control', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
+          input = el('textarea', { class: 'textarea', name: f.name, rows: f.rows || 3, placeholder: f.placeholder || '' });
         } else {
           input = el('input', {
-            class: 'input form-control', name: f.name, type: f.type || 'text',
+            class: 'input', name: f.name, type: f.type || 'text',
             placeholder: f.placeholder || '', min: f.min, max: f.max, step: f.step
           });
         }
@@ -1283,7 +1311,10 @@
   /* ---------------- 导航 ---------------- */
   function setActiveNav(id) {
     document.querySelectorAll('#sidenav .nav-item, #tabbar .tab-item').forEach(function (node) {
-      node.classList.toggle('active', node.dataset.mod === id);
+      var on = node.dataset.mod === id;
+      node.classList.toggle('menu-active', on);  /* daisyUI menu 选中态 */
+      node.classList.toggle('dock-active', on);  /* daisyUI dock 选中态 */
+      node.classList.toggle('active', on);
     });
   }
 
@@ -1379,19 +1410,21 @@
     if (META.length <= 1) document.documentElement.setAttribute('data-solo', '1');
 
     META.forEach(function (meta) {
-      sidenav.appendChild(el('button', {
+      /* daisyUI menu：条目必须由 <li> 包裹，激活态是 menu-active */
+      sidenav.appendChild(el('li', {}, el('button', {
         class: 'nav-item', type: 'button', dataset: { mod: meta.id },
         onclick: function () { navigate(meta.id); }
       },
-        svgNode(meta.icon || '🧩', 'nav-icon'),
-        el('span', { text: meta.name })));
+        svgNode(meta.icon || 'box', 'nav-icon'),
+        el('span', { text: meta.name }))));
 
+      /* daisyUI dock：条目是 dock 的直接子元素，文案要挂 dock-label */
       tabbar.appendChild(el('button', {
         class: 'tab-item', type: 'button', dataset: { mod: meta.id },
         onclick: function () { navigate(meta.id); }
       },
-        svgNode(meta.icon || '🧩', 'tab-icon'),
-        el('span', { text: meta.name })));
+        svgNode(meta.icon || 'box', 'tab-icon'),
+        el('span', { class: 'dock-label', text: meta.name })));
     });
   }
 
@@ -1410,19 +1443,15 @@
   }
 
   function buildTheme() {
-    var btn = document.getElementById('theme-toggle');
-    function paint() {
-      var light = document.documentElement.dataset.theme === 'light';
-      btn.innerHTML = iconHtml(light ? 'sun' : 'moon') || (light ? '☀️' : '🌙');
-    }
+    /* daisyUI swap：图标由 HTML 里的 swap-off/swap-on 承担，JS 只驱动 checkbox 勾选态 */
+    var box = document.getElementById('theme-toggle');
+    if (!box) return;
     util.applyTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
-    btn.addEventListener('click', function () {
-      var next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    box.addEventListener('change', function () {
+      var next = box.checked ? 'dark' : 'light';
       util.applyTheme(next);
       try { localStorage.setItem('panel.theme', next); } catch (e) {}
-      paint();
     });
-    paint();
   }
 
   function boot() {

@@ -77,6 +77,12 @@
     return course.weeks.indexOf(week) !== -1;
   }
 
+  /* 个人面板不显示的课：数据标 personal:false（别的教学班的平行课，例如大学日语）。
+     公共课表站（BOOT.readOnly）照常显示——同班有同学上这门课。 */
+  function personalHidden(c) {
+    return !BOOT.readOnly && !!c && c.personal === false;
+  }
+
   /** 课程最早开课周（用于并排时周数靠前的排左栏） */
   function minWeek(c) {
     if (!Array.isArray(c.weeks) || !c.weeks.length) return 0;
@@ -155,6 +161,119 @@
       }
     }
     return { kind: 'normal' };
+  }
+
+  /* ---------------- 专业答疑（settings.mentoring） ----------------
+     班主任安排的面对面答疑：每周一条，以宿舍为单位，挂在周一地图学实习（实验课）之后。
+     数据驱动（week/day/start/end + dorms），个人面板与班级公共课表共用这段渲染逻辑。 */
+  function mentoringCfg() {
+    var m = doc && doc.settings && doc.settings.mentoring;
+    return m && typeof m === 'object' ? m : null;
+  }
+
+  function mentoringFor(week) {
+    var cfg = mentoringCfg();
+    var items = cfg && Array.isArray(cfg.items) ? cfg.items : [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i] && Number(items[i].week) === Number(week)) return items[i];
+    }
+    return null;
+  }
+
+  /** 答疑对象：A403（男） / B409（男） + A505（女） */
+  function dormText(m) {
+    return (Array.isArray(m && m.dorms) ? m.dorms : []).map(function (d) {
+      return typeof d === 'string' ? d : (d.n || '') + (d.g ? '（' + d.g + '）' : '');
+    }).join(' + ');
+  }
+
+  function periodOf(ps, n) {
+    for (var i = 0; i < ps.length; i++) {
+      if (Number(ps[i].n) === Number(n)) return ps[i];
+    }
+    return ps[0];
+  }
+
+  /* ---------------- 临时调课（settings.overrides） ----------------
+     一次性改动，按「日期 + 课程」覆盖地点：{ date, course, place, note }。
+     只影响那一天，不改动课程本身；个人面板与公共课表共用。 */
+  function changeList() {
+    var a = doc && doc.settings && doc.settings.overrides;
+    return Array.isArray(a) ? a : [];
+  }
+
+  function courseById(id) {
+    for (var i = 0; i < doc.courses.length; i++) {
+      if (String(doc.courses[i].id) === String(id)) return doc.courses[i];
+    }
+    return null;
+  }
+
+  function changeFor(dateStr, courseId) {
+    var list = changeList();
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o && o.date === dateStr && String(o.course) === String(courseId)) return o;
+    }
+    return null;
+  }
+
+  function changeNote(list) {
+    return C('div', { class: 'kb-change-note' },
+      Panel.icon('warn'),
+      C('div', { class: 'kb-change-text' },
+        list.map(function (o) {
+          var c = courseById(o.course) || {};
+          return C('div', { class: 'kb-notice-row' },
+            C('b', { text: fmtMD(o.date) + ' ' + DAY_CN[dayIdx(o.date)] + ' · ' + (c.name || '课程') }),
+            C('span', {
+              text: '地点改为 ' + o.place +
+                (c.place ? '（原 ' + c.place + '）' : '') +
+                (o.note ? ' · ' + o.note : '')
+            }));
+        })));
+  }
+
+  function mentorRangeText(m, ps) {
+    return periodOf(ps, m.start).start + '-' + periodOf(ps, m.end).end;
+  }
+
+  /** 本周答疑提示条（网格上方）：一眼看到这周的宿舍安排 */
+  function mentorNote(m) {
+    var cfg = mentoringCfg() || {};
+    var ps = periods();
+    return C('div', {
+      class: 'kb-mentor-note',
+      onclick: function () { showMentor(m); }
+    },
+      Panel.icon('info'),
+      C('div', { class: 'kb-mentor-text' },
+        C('b', { text: '第' + m.week + '周 · ' + (cfg.title || '专业答疑') + ' · ' + dormText(m) }),
+        C('span', { text: mentorRangeText(m, ps) + ' · ' + (cfg.note || '地图学实验课后留下，约 30-40 分钟') })));
+  }
+
+  function showMentor(m) {
+    var cfg = mentoringCfg() || {};
+    var ps = periods();
+    var dl = C('dl', { class: 'kv' });
+    [
+      ['周次', '第 ' + m.week + ' 周 · ' + DAY_CN[(m.day || 1) - 1]],
+      ['时间', mentorRangeText(m, ps) + '（' + (cfg.note || '课后留下约 30-40 分钟') + '）'],
+      ['答疑对象', dormText(m)],
+      ['形式', cfg.form || '以宿舍为单位，和班主任面对面聊专业学习与大学生活']
+    ].forEach(function (r) {
+      dl.appendChild(C('dt', { text: r[0] }));
+      dl.appendChild(C('dd', { text: r[1] }));
+    });
+    Panel.ui.modal({
+      title: cfg.title || '专业答疑',
+      body: [
+        C('div', { class: 'kb-detail-head kb-mentor-head' },
+          C('div', { class: 'kb-detail-name', text: dormText(m) }),
+          C('div', { class: 'kb-detail-time', text: mentorRangeText(m, ps) + ' · 第 ' + m.week + ' 周 ' + DAY_CN[(m.day || 1) - 1] })),
+        dl
+      ]
+    });
   }
 
   /* ---------------- 左右滑动切周 ----------------
@@ -246,6 +365,16 @@
         align: 'start', startIndex: idx,
         loop: false, containScroll: false, dragFree: false, skipSnaps: false
       });
+      /* select：目标页一确定就更新周条（不必等动量完全落定），消除「慢一秒」 */
+      emblaInst.on('select', function () {
+        if (!emblaInst) return;
+        var i = emblaInst.selectedScrollSnap();
+        var page = scroll.querySelectorAll('.kb-page')[i];
+        var w = page ? Number(page.getAttribute('data-w')) : 0;
+        if (!w || w === activeWeek()) return;
+        viewWeek = w;
+        syncChrome(w);
+      });
       emblaInst.on('settle', function () {
         if (!emblaInst) return;
         var i = emblaInst.selectedScrollSnap();
@@ -300,7 +429,7 @@
         }, '回到本周'));
       }
     }
-    var visible = doc.courses.filter(function (c) { return inWeek(c, w); });
+    var visible = doc.courses.filter(function (c) { return !personalHidden(c) && inWeek(c, w); });
     var note = host.querySelector('.kb-extra-note');
     if (note) note.textContent = '本周 ' + visible.length + ' 节课';
     updateNow();
@@ -396,13 +525,13 @@
     var week = activeWeek();
     var now = new Date();
     var weekStart = U.addDays(U.mondayOf(now), (week - currentWeek()) * 7);
-    var visible = doc.courses.filter(function (c) { return inWeek(c, week); });
+    var visible = doc.courses.filter(function (c) { return !personalHidden(c) && inWeek(c, week); });
 
     var bar = C('div', { class: 'card kb-bar' },
       C('div', { class: 'kb-week' },
         C('button', { class: 'kb-arrow', type: 'button', title: '上一周', html: Panel.iconHtml('chevronL'), onclick: function () { goWeek(-1); } }),
         C('select', {
-          class: 'form-select kb-week-select',
+          class: 'select kb-week-select',
           'aria-label': '选择教学周',
           onchange: function (e) {
             viewWeek = Number(e.target.value);
@@ -452,6 +581,18 @@
       C('span', { class: 'dot', text: '·' }),
       C('span', { class: 'kb-extra-note', text: '本周 ' + visible.length + ' 节课' })));
 
+    /* 本周专业答疑：全部周概览没有具体周次，不显示 */
+    var mEntry = s.showAllWeeks ? null : mentoringFor(week);
+    if (mEntry) host.appendChild(mentorNote(mEntry));
+
+    /* 本周临时调课（改地点等）：只提示落在这一周的改动 */
+    var wkChanges = s.showAllWeeks ? [] : changeList().filter(function (o) {
+      if (!o || !o.place || !courseById(o.course)) return false;
+      var d = U.parseDate(o.date);
+      return d >= weekStart && d <= U.addDays(weekStart, 6);
+    });
+    if (wkChanges.length) host.appendChild(changeNote(wkChanges));
+
     /* ---- 课表格子 ----
        滑动切周 = Embla 分页（第五版，手感实验室实测用户选定），并按用户建议
        1-20 周全部预渲染成 slides（1.0.19）：
@@ -497,7 +638,7 @@
     var todayIdx = (now.getDay() + 6) % 7;
     var weekStart = U.addDays(U.mondayOf(now), (week - currentWeek()) * 7);
     var isCurWeek = week === currentWeek();
-    var visible = doc.courses.filter(function (c) { return inWeek(c, week); });
+    var visible = doc.courses.filter(function (c) { return !personalHidden(c) && inWeek(c, week); });
 
     /* 每列日期的显示方案（调休补课 / 放假）；全部周概览时不套用调休方案 */
     var plans = [];
@@ -577,7 +718,7 @@
       var list;
       if (colPlan.kind === 'map') {
         /* 补课/调休列：按来源日期的星期与教学周取课 */
-        list = doc.courses.filter(function (c) { return c.day === colPlan.srcDay && inWeek(c, colPlan.week); });
+        list = doc.courses.filter(function (c) { return !personalHidden(c) && c.day === colPlan.srcDay && inWeek(c, colPlan.week); });
       } else {
         list = visible.filter(function (c) { return c.day === day; });
       }
@@ -618,11 +759,16 @@
         g.forEach(function (c) { c._lanes = laneEnds.length; });
       });
 
+      /* 这一列对应的真实日期：临时调课按日期命中 */
+      var colDate = U.today(U.addDays(weekStart, day - 1));
+
       list.forEach(function (c) {
         var cp = colPlan;
         var sw = cp.kind === 'map' ? cp.week : week;
         var w = 100 / c._lanes;
         var col = colorOf(c.name);
+        var chg = changeFor(colDate, c.id);
+        var place = chg && chg.place ? chg.place : (c.place || '待定');
         var card = C('div', {
           class: 'kb-course',
           style: {
@@ -636,18 +782,43 @@
           },
           onclick: function () {
             if (dragMoved) { dragMoved = false; return; }
-            showDetail(c, sw, cp.kind === 'map' ? cp : null);
+            showDetail(c, sw, cp.kind === 'map' ? cp : null, chg);
           }
         },
           C('div', { class: 'kb-course-name', text: c.name }),
           C('div', { class: 'kb-course-info' },
-            C('span', { text: c.place || '待定' })),
+            C('span', { text: place }),
+            chg ? C('span', { class: 'kb-course-flag', text: '改地点' }) : null),
           C('div', {
             class: 'kb-course-sub',
             text: c.start === c.end ? c.start + ' 节' : c.start + '–' + c.end + ' 节'
           }));
         grid.appendChild(card);
       });
+    }
+
+    /* ---- 专业答疑卡片（按周安排，只在对应周的周一列） ---- */
+    var mentor = showAll ? null : mentoringFor(week);
+    if (mentor && plans[(mentor.day || 1) - 1].kind !== 'off') {
+      var mRow = layout.rows[mentor.start];
+      var mRowEnd = layout.rows[mentor.end];
+      if (mRow && mRowEnd) {
+        grid.appendChild(C('div', {
+          class: 'kb-course kb-mentor',
+          style: {
+            gridRow: mRow + ' / span ' + (mRowEnd - mRow + 1),
+            gridColumn: String((mentor.day || 1) + 1),
+            animationDelay: '0.24s'
+          },
+          onclick: function () {
+            if (dragMoved) { dragMoved = false; return; }
+            showMentor(mentor);
+          }
+        },
+          C('div', { class: 'kb-course-name', text: '专业答疑' }),
+          C('div', { class: 'kb-course-info' }, C('span', { text: dormText(mentor) })),
+          C('div', { class: 'kb-course-sub', text: '课后 · 约30-40分钟' })));
+      }
     }
   }
 
@@ -665,12 +836,14 @@
     var todayIdx = (now.getDay() + 6) % 7;
     var week = currentWeek();
     var pl = planFor(U.today(now));
+    /* 专业答疑只在真实周一、非调休列显示（调休补课时今天按别的星期上课） */
+    var mentor = (pl.kind === 'normal' && todayIdx === 0) ? mentoringFor(week) : null;
 
     if (pl.kind === 'off') {
       card.appendChild(C('div', { class: 'card-title' },
         C('span', { text: '今日课程 · ' + DAY_CN[todayIdx] + ' ' + U.fmtDate(now) + '（放假）' }),
         C('span', { class: 'sub' })));
-      card.appendChild(Panel.ui.empty('🎉', '今天放假', '调休放假，没有课'));
+      card.appendChild(Panel.ui.empty('check', '今天放假', '调休放假，没有课'));
       return card;
     }
 
@@ -685,7 +858,7 @@
 
     var list = doc.courses
       .filter(function (c) {
-        if (c.day !== dayNum) return false;
+        if (personalHidden(c) || c.day !== dayNum) return false;
         return !Array.isArray(c.weeks) || c.weeks.indexOf(week) !== -1;
       })
       .sort(function (a, b) { return a.start - b.start; });
@@ -695,8 +868,8 @@
       C('span', { class: 'sub', text: list.length ? list.length + ' 节' : '' }));
     card.appendChild(head);
 
-    if (!list.length) {
-      card.appendChild(Panel.ui.empty('🎉', '今天没有课', '好好安排自己的时间吧'));
+    if (!list.length && !mentor) {
+      card.appendChild(Panel.ui.empty('check', '今天没有课', '好好安排自己的时间吧'));
       return card;
     }
 
@@ -714,15 +887,30 @@
         nextInfo = '下一节：' + c.name + '（' + (h ? h + ' 小时 ' : '') + m + ' 分钟后）';
       }
       var col = colorOf(c.name);
+      var chg = changeFor(U.today(now), c.id);
+      var placeText = chg && chg.place ? chg.place + '（改地点）' : (c.place || '待定');
       card.appendChild(C('div', { class: 'today-item' },
         C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,' + col[0] + ',' + col[1] + ')' } }),
         C('div', { class: 'today-main' },
           C('div', { class: 'today-name', text: c.name }),
-          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + ' · ' + (c.place || '待定') + (c.teacher ? ' · ' + c.teacher : '') })),
+          C('div', { class: 'today-sub', text: p.start + '-' + pe.end + ' · ' + placeText + (c.teacher ? ' · ' + c.teacher : '') })),
         C('span', { class: 'today-status ' + cls, text: status })));
     });
 
-    if (nextInfo) card.appendChild(C('div', { class: 'today-next', text: '⏰ ' + nextInfo }));
+    if (mentor) {
+      var m1 = periodOf(ps, mentor.start), m2 = periodOf(ps, mentor.end);
+      var mFrom = minutesOf(m1.start), mTo = minutesOf(m2.end);
+      var mStatus = nowMin >= mTo ? '已结束' : nowMin >= mFrom ? '进行中' : '还有 ' + (mFrom - nowMin) + ' 分钟';
+      var mCls = nowMin >= mFrom && nowMin < mTo ? 'live' : nowMin >= mTo ? 'done' : 'soon';
+      card.appendChild(C('div', { class: 'today-item today-mentor', onclick: function () { showMentor(mentor); } },
+        C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,#7C5CFA,#A78BFA)' } }),
+        C('div', { class: 'today-main' },
+          C('div', { class: 'today-name', text: '专业答疑' }),
+          C('div', { class: 'today-sub', text: m1.start + '-' + m2.end + ' · ' + dormText(mentor) + ' · 地图学实验课后' })),
+        C('span', { class: 'today-status ' + mCls, text: mStatus })));
+    }
+
+    if (nextInfo) card.appendChild(C('div', { class: 'today-next' }, Panel.icon('timer'), ' ' + nextInfo));
     return card;
   }
 
@@ -789,7 +977,7 @@
   }
 
   /* ---- 课程详情 ---- */
-  function showDetail(c, week, ovr) {
+  function showDetail(c, week, ovr, chg) {
     var col = colorOf(c.name);
     var ps = periods();
     var timeText = ps.filter(function (p) { return p.n >= c.start && p.n <= c.end; })
@@ -804,7 +992,7 @@
 
     var rows = [
       ['周次', c.weekText || (c.weeks ? c.weeks.join(',') + '周' : '')],
-      ['上课地点', (c.campus ? c.campus + ' · ' : '') + (c.place || '待定')],
+      ['上课地点', (c.campus ? c.campus + ' · ' : '') + ((chg && chg.place) || c.place || '待定')],
       ['教师', c.teacher || '—'],
       ['考核方式', c.exam || '—'],
       ['学分', c.credit || '—'],
@@ -814,6 +1002,10 @@
       ['教学班', c.class || '—'],
       ['教学班组成', c.group || '—']
     ];
+    if (chg && chg.place) {
+      rows.push(['临时调课', '本次改到 ' + chg.place + (c.place ? '（原 ' + c.place + '）' : '') +
+        (chg.note ? ' · ' + chg.note : '')]);
+    }
     if (ovr && ovr.kind === 'map') rows.push(['调休补课', ovr.note]);
     var dl = C('dl', { class: 'kv' });
     rows.forEach(function (r) {
