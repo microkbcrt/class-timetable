@@ -270,6 +270,61 @@
     return (b.time || '') + (b.place ? ' · ' + b.place : '');
   }
 
+  /* ---- 活动块精确对位（红线同款规则） ----
+     任意钟点 → 网格内像素偏移：落在某节内按该节起止线性插值；恰在节界/空隙取中点。
+     红线（kb-now-line）就是这么定位的，观赛卡用同一套，保证 10:00-11:00 视觉对准。 */
+  function gridOffsetAt(grid, ps, min) {
+    var slots = [];
+    for (var i = 0; i < ps.length; i++) {
+      var s = grid.querySelector('.kb-slot[data-period-index="' + i + '"]');
+      if (!s) return null;
+      slots.push(s);
+    }
+    var gTop = grid.getBoundingClientRect().top;
+    var first = slots[0].getBoundingClientRect();
+    var last = slots[slots.length - 1].getBoundingClientRect();
+    if (min <= minutesOf(ps[0].start)) return first.top - gTop;
+    if (min >= minutesOf(ps[ps.length - 1].end)) return last.bottom - gTop;
+    for (var j = 0; j < ps.length; j++) {
+      var a = minutesOf(ps[j].start), b = minutesOf(ps[j].end);
+      var rect = slots[j].getBoundingClientRect();
+      if (min > a && min < b) return rect.top - gTop + (min - a) / (b - a) * rect.height;
+      if (min === b && j < ps.length - 1) {
+        var nb = slots[j + 1].getBoundingClientRect();
+        return (rect.bottom + nb.top) / 2 - gTop;
+      }
+      if (min > b && j < ps.length - 1 && min < minutesOf(ps[j + 1].start)) {
+        var ng = slots[j + 1].getBoundingClientRect();
+        return (rect.bottom + ng.top) / 2 - gTop;
+      }
+    }
+    return null;
+  }
+
+  /* 活动块卡定位/重定位：render 与 30s ticker 都会跑，窗口断点变化也能在半分钟内自愈 */
+  function positionBlockCards() {
+    if (!host) return;
+    var ps = periods();
+    host.querySelectorAll('.kb-grid').forEach(function (grid) {
+      grid.querySelectorAll('.kb-course.kb-event[data-bstart]').forEach(function (card) {
+        var sMin = +card.dataset.bstart, eMin = +card.dataset.bend;
+        if (!(sMin >= 0) || !(eMin > sMin)) return;
+        var cell = grid.querySelector('.kb-cell[data-col="' + card.dataset.col + '"]');
+        if (!cell) return;
+        var top = gridOffsetAt(grid, ps, sMin);
+        var bottom = gridOffsetAt(grid, ps, eMin);
+        if (top == null || bottom == null || bottom - top <= 18) return;
+        var cRect = cell.getBoundingClientRect();
+        var gRect = grid.getBoundingClientRect();
+        card.style.position = 'absolute';
+        card.style.top = top.toFixed(1) + 'px';
+        card.style.height = (bottom - top).toFixed(1) + 'px';
+        card.style.left = (cRect.left - gRect.left + 2).toFixed(1) + 'px';
+        card.style.width = (cRect.width - 4).toFixed(1) + 'px';
+      });
+    });
+  }
+
   function showOffBlock(dateStr, b) {
     var dl = C('dl', { class: 'kv' });
     [
@@ -868,7 +923,9 @@
       }
     }
 
-    /* ---- 放假列里的活动块（校运会观赛等）：与答疑卡同形，橙色区分 ---- */
+    /* ---- 放假列里的活动块（校运会观赛等）：与答疑卡同形，橙色区分。
+       有钟点时按红线同款插值精确定位（如 10:00-11:00 对准格子真实位置）；
+       算不出（无钟点/布局未就绪）则退回按节次占格。 ---- */
     for (var d3 = 1; d3 <= 7; d3++) {
       var bpl = plans[d3 - 1];
       var bb = bpl.kind === 'off' ? bpl.block : null;
@@ -876,13 +933,32 @@
       var bRowEnd = bb ? layout.rows[bb.end] : 0;
       if (!bRow || !bRowEnd) continue;
       var bDate = U.today(U.addDays(weekStart, d3 - 1));
+      var btp = String(bb.time || '').split('-');
+      var bStartMin = btp[0] ? minutesOf(btp[0]) : -1;
+      var bEndMin = btp[1] ? minutesOf(btp[1]) : -1;
+      var bStyle = null;
+      if (bStartMin >= 0 && bEndMin > bStartMin) {
+        var bCell = grid.querySelector('.kb-cell[data-col="' + (d3 + 1) + '"]');
+        var bTop = gridOffsetAt(grid, ps, bStartMin);
+        var bBottom = gridOffsetAt(grid, ps, bEndMin);
+        if (bCell && bTop != null && bBottom != null && bBottom - bTop > 18) {
+          var bRect = bCell.getBoundingClientRect();
+          bStyle = {
+            position: 'absolute',
+            top: bTop.toFixed(1) + 'px',
+            height: (bBottom - bTop).toFixed(1) + 'px',
+            left: (bRect.left - grid.getBoundingClientRect().left + 2).toFixed(1) + 'px',
+            width: (bRect.width - 4).toFixed(1) + 'px'
+          };
+        }
+      }
+      if (!bStyle) {
+        bStyle = { gridRow: bRow + ' / span ' + (bRowEnd - bRow + 1), gridColumn: String(d3 + 1) };
+      }
       grid.appendChild(C('div', {
         class: 'kb-course kb-event',
-        style: {
-          gridRow: bRow + ' / span ' + (bRowEnd - bRow + 1),
-          gridColumn: String(d3 + 1),
-          animationDelay: '0.24s'
-        },
+        dataset: { bstart: String(bStartMin), bend: String(bEndMin), col: String(d3 + 1) },
+        style: Object.assign({ animationDelay: '0.24s' }, bStyle),
         onclick: function (blk, ds) {
           return function () {
             if (dragMoved) { dragMoved = false; return; }
@@ -1025,6 +1101,7 @@
       });
     }
     updateNowLine(ps, nowMin);
+    positionBlockCards();
   }
 
   function updateNowLine(ps, nowMin) {
