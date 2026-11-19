@@ -132,7 +132,7 @@
     for (i = 0; i < arr.length; i++) {
       e = arr[i];
       if (e && e.mode === 'off' && e.date === dateStr) {
-        return { kind: 'off', badge: '放假', tone: 'off' };
+        return { kind: 'off', badge: e.label || '放假', tone: 'off', note: e.note || '', block: e.block || null };
       }
     }
     for (i = 0; i < arr.length; i++) {
@@ -234,6 +234,18 @@
         })));
   }
 
+  /* 校运会等带提醒的放假日：网格放不下 8 点前/全天的事，用横幅顶在课表上方 */
+  function offNote(list) {
+    return C('div', { class: 'kb-change-note' },
+      Panel.icon('info'),
+      C('div', { class: 'kb-change-text' },
+        list.map(function (e) {
+          return C('div', { class: 'kb-notice-row' },
+            C('b', { text: fmtMD(e.date) + ' ' + DAY_CN[dayIdx(e.date)] + ' · ' + (e.label || '放假') }),
+            C('span', { text: e.note }));
+        })));
+  }
+
   function mentorRangeText(m, ps) {
     return periodOf(ps, m.start).start + '-' + periodOf(ps, m.end).end;
   }
@@ -250,6 +262,33 @@
       C('div', { class: 'kb-mentor-text' },
         C('b', { text: '第' + m.week + '周 · ' + (cfg.title || '专业答疑') + ' · ' + dormText(m) }),
         C('span', { text: mentorRangeText(m, ps) + ' · ' + (cfg.note || '地图学实验课后留下，约 30-40 分钟') })));
+  }
+
+  /* 校运会观赛等「放假日里的活动块」：数据在 swap.block（name/start/end/time/place），
+     start/end 是节次（决定卡片在网格里的行位），time 是真实钟点（卡片/日历展示用） */
+  function blockText(b) {
+    return (b.time || '') + (b.place ? ' · ' + b.place : '');
+  }
+
+  function showOffBlock(dateStr, b) {
+    var dl = C('dl', { class: 'kv' });
+    [
+      ['日期', fmtMD(dateStr) + ' ' + DAY_CN[dayIdx(dateStr)]],
+      ['时间', blockText(b)],
+      ['内容', b.name || '集体活动']
+    ].forEach(function (r) {
+      dl.appendChild(C('dt', { text: r[0] }));
+      dl.appendChild(C('dd', { text: r[1] }));
+    });
+    Panel.ui.modal({
+      title: b.name || '集体活动',
+      body: [
+        C('div', { class: 'kb-detail-head kb-event-head' },
+          C('div', { class: 'kb-detail-name', text: b.name || '集体活动' }),
+          C('div', { class: 'kb-detail-time', text: fmtMD(dateStr) + ' ' + DAY_CN[dayIdx(dateStr)] + ' · ' + blockText(b) })),
+        dl
+      ]
+    });
   }
 
   function showMentor(m) {
@@ -593,6 +632,14 @@
     });
     if (wkChanges.length) host.appendChild(changeNote(wkChanges));
 
+    /* 本周带提醒的放假日（校运会等）：只提示落在这一周的 */
+    var wkOffNotes = s.showAllWeeks ? [] : swapList().filter(function (e) {
+      if (!e || e.mode !== 'off' || !e.note) return false;
+      var d = U.parseDate(e.date);
+      return d >= weekStart && d <= U.addDays(weekStart, 6);
+    });
+    if (wkOffNotes.length) host.appendChild(offNote(wkOffNotes));
+
     /* ---- 课表格子 ----
        滑动切周 = Embla 分页（第五版，手感实验室实测用户选定），并按用户建议
        1-20 周全部预渲染成 slides（1.0.19）：
@@ -820,6 +867,33 @@
           C('div', { class: 'kb-course-sub', text: '课后 · 约30-40分钟' })));
       }
     }
+
+    /* ---- 放假列里的活动块（校运会观赛等）：与答疑卡同形，橙色区分 ---- */
+    for (var d3 = 1; d3 <= 7; d3++) {
+      var bpl = plans[d3 - 1];
+      var bb = bpl.kind === 'off' ? bpl.block : null;
+      var bRow = bb ? layout.rows[bb.start] : 0;
+      var bRowEnd = bb ? layout.rows[bb.end] : 0;
+      if (!bRow || !bRowEnd) continue;
+      var bDate = U.today(U.addDays(weekStart, d3 - 1));
+      grid.appendChild(C('div', {
+        class: 'kb-course kb-event',
+        style: {
+          gridRow: bRow + ' / span ' + (bRowEnd - bRow + 1),
+          gridColumn: String(d3 + 1),
+          animationDelay: '0.24s'
+        },
+        onclick: function (blk, ds) {
+          return function () {
+            if (dragMoved) { dragMoved = false; return; }
+            showOffBlock(ds, blk);
+          };
+        }(bb, bDate)
+      },
+        C('div', { class: 'kb-course-name', text: bb.name || '集体活动' }),
+        C('div', { class: 'kb-course-info' }, C('span', { text: bb.place || '' })),
+        C('div', { class: 'kb-course-sub', text: bb.time || '' })));
+    }
   }
 
   /* 重建今日课程卡片（含倒计时 / 进行中 / 已上完状态），供定时刷新调用 */
@@ -841,9 +915,25 @@
 
     if (pl.kind === 'off') {
       card.appendChild(C('div', { class: 'card-title' },
-        C('span', { text: '今日课程 · ' + DAY_CN[todayIdx] + ' ' + U.fmtDate(now) + '（放假）' }),
+        C('span', { text: '今日课程 · ' + DAY_CN[todayIdx] + ' ' + U.fmtDate(now) + '（' + (pl.badge || '放假') + '）' }),
         C('span', { class: 'sub' })));
-      card.appendChild(Panel.ui.empty('check', '今天放假', '调休放假，没有课'));
+      var tb = pl.block;
+      if (tb) {
+        /* 有活动块（如观赛）：不画"没有课"空态，直接给带状态的条 */
+        var tp = String(tb.time || '').split('-');
+        var bNow = nowMinutes();
+        var tFrom = minutesOf(tp[0]), tTo = minutesOf(tp[1] || tp[0]);
+        var tStatus = bNow >= tTo ? '已结束' : bNow >= tFrom ? '进行中' : '还有 ' + (tFrom - bNow) + ' 分钟';
+        var tCls = bNow >= tFrom && bNow < tTo ? 'live' : bNow >= tTo ? 'done' : 'soon';
+        card.appendChild(C('div', { class: 'today-item today-mentor', onclick: function () { showOffBlock(U.today(now), tb); } },
+          C('i', { class: 'today-bar', style: { background: 'linear-gradient(180deg,#F97316,#FBBF24)' } }),
+          C('div', { class: 'today-main' },
+            C('div', { class: 'today-name', text: tb.name || '集体活动' }),
+            C('div', { class: 'today-sub', text: blockText(tb) + (pl.note && pl.note !== blockText(tb) ? ' · ' + pl.note : '') })),
+          C('span', { class: 'today-status ' + tCls, text: tStatus })));
+      } else {
+        card.appendChild(Panel.ui.empty('check', '今天' + (pl.badge || '放假'), pl.note || '调休放假，没有课'));
+      }
       return card;
     }
 
