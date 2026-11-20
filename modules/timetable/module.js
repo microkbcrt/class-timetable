@@ -246,6 +246,27 @@
         })));
   }
 
+  /* ---------------- 全局通知（settings.notices） ----------------
+     考试/事务类横幅：按日期区间挂在课表上方，区间与本周有交集才显示 */
+  function noticeList() {
+    var a = doc && doc.settings && doc.settings.notices;
+    return Array.isArray(a) ? a : [];
+  }
+
+  function noticeNote(list) {
+    return C('div', { class: 'kb-change-note' },
+      Panel.icon('warn'),
+      C('div', { class: 'kb-change-text' },
+        list.map(function (n) {
+          var range = n.start === n.end
+            ? fmtMD(n.start) + ' ' + DAY_CN[dayIdx(n.start)]
+            : fmtMD(n.start) + ' - ' + fmtMD(n.end);
+          return C('div', { class: 'kb-notice-row' },
+            C('b', { text: range + ' · ' + (n.title || '通知') }),
+            C('span', { text: n.note || '' }));
+        })));
+  }
+
   function mentorRangeText(m, ps) {
     return periodOf(ps, m.start).start + '-' + periodOf(ps, m.end).end;
   }
@@ -694,6 +715,14 @@
       return d >= weekStart && d <= U.addDays(weekStart, 6);
     });
     if (wkOffNotes.length) host.appendChild(offNote(wkOffNotes));
+
+    /* 本周全局通知（线上考试等）：区间与本周有交集才显示 */
+    var wkNotices = s.showAllWeeks ? [] : noticeList().filter(function (n) {
+      if (!n || !n.start || !n.end) return false;
+      var a = U.parseDate(n.start), b = U.parseDate(n.end);
+      return b >= weekStart && a <= U.addDays(weekStart, 6);
+    });
+    if (wkNotices.length) host.appendChild(noticeNote(wkNotices));
 
     /* ---- 课表格子 ----
        滑动切周 = Embla 分页（第五版，手感实验室实测用户选定），并按用户建议
